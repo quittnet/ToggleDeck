@@ -63,7 +63,8 @@ enum CLI {
       return 4
     }
 
-    if !spec.restarts.isEmpty {
+    let restartServices = UserDefaults.standard.object(forKey: "restartServices") as? Bool ?? true
+    if restartServices && !spec.restarts.isEmpty {
       Shell.run(spec.restarts.map(\.killCommand).joined(separator: "; "), timeout: 10)
     }
 

@@ -130,14 +130,14 @@ enum LoginItem {
         let data = try? PropertyListSerialization.data(
           fromPropertyList: plist, format: .xml, options: 0)
       else { return }
+      // No `launchctl bootstrap`: the plist has RunAtLoad, so loading it now
+      // would start a second copy next to this one. launchd picks the file
+      // up at the next login, which is all "launch at login" needs.
       try? data.write(to: url)
-      Shell.run(
-        "/bin/launchctl bootstrap gui/$(id -u) \(Shell.quote(url.path)) 2>/dev/null || /bin/launchctl load \(Shell.quote(url.path)) 2>/dev/null || true"
-      )
     } else {
-      Shell.run(
-        "/bin/launchctl bootout gui/$(id -u)/\(label) 2>/dev/null || /bin/launchctl unload \(Shell.quote(url.path)) 2>/dev/null || true"
-      )
+      // Remove the file only. `launchctl bootout` would SIGTERM this process
+      // when launchd started it, killing the app before the plist was
+      // deleted. With the file gone the job is not loaded at the next login.
       try? fm.removeItem(at: url)
     }
   }

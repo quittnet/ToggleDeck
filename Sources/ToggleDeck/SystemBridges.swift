@@ -319,11 +319,12 @@ final class Bridges: @unchecked Sendable {
       "tell application \"System Events\" to tell appearance preferences to set dark mode to \(on)"
     let r = Shell.run("/usr/bin/osascript -e \(Shell.quote(script))", timeout: 10)
     if r.ok { return nil }
-    if r.out.contains("-1743") || r.out.lowercased().contains("not allowed") {
+    let message = r.message
+    if message.contains("-1743") || message.lowercased().contains("not allowed") {
       return
         "Grant ToggleDeck permission to control System Events under Privacy & Security → Automation."
     }
-    return r.out.isEmpty ? "Appearance change failed." : r.out
+    return message.isEmpty ? "Appearance change failed." : message
   }
 
   // MARK: Keep Awake
