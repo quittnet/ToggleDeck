@@ -53,7 +53,7 @@ enum IconGenerator {
     try? fm.removeItem(at: iconset)
 
     if !result.ok {
-      FileHandle.standardError.write(Data("iconutil failed: \(result.out)\n".utf8))
+      FileHandle.standardError.write(Data("iconutil failed: \(result.message)\n".utf8))
       return 1
     }
     print("wrote \(output)")

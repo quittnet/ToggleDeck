@@ -22,6 +22,9 @@ final class ToggleEngine: ObservableObject {
   /// Bumped on every scheduled restart so a superseded work item can tell it has
   /// been replaced and do nothing.
   private var restartGeneration = 0
+  /// Bumped per control when a write starts. A refresh whose read began before
+  /// a write must not publish its now-outdated value once the write finishes.
+  private var writeGeneration: [String: Int] = [:]
   private let isPreview: Bool
 
   private init(preview: Bool = false) {
@@ -123,6 +126,7 @@ final class ToggleEngine: ObservableObject {
       states[spec.id] = st
     }
 
+    let generations = writeGeneration
     let results = await withTaskGroup(of: (String, ToggleState).self) { group in
       for spec in costly {
         group.addTask { (spec.id, Self.read(spec)) }
@@ -132,7 +136,8 @@ final class ToggleEngine: ObservableObject {
       return out
     }
 
-    for (id, st) in results where !(states[id]?.busy ?? false) {
+    for (id, st) in results
+    where !(states[id]?.busy ?? false) && writeGeneration[id] == generations[id] {
       var s = st
       s.error = states[id]?.error
       states[id] = s
@@ -142,8 +147,9 @@ final class ToggleEngine: ObservableObject {
   func refresh(_ id: String) async {
     guard !isPreview else { return }
     guard let spec = Catalog.byID[id] else { return }
+    let generation = writeGeneration[id]
     let st = await Task.detached { Self.read(spec) }.value
-    guard !(states[id]?.busy ?? false) else { return }
+    guard !(states[id]?.busy ?? false), writeGeneration[id] == generation else { return }
     states[id] = st
   }
 
@@ -169,6 +175,7 @@ final class ToggleEngine: ObservableObject {
     guard !st.busy else { return }
 
     // Show the new position immediately; correct it if the write is rejected.
+    writeGeneration[id, default: 0] += 1
     let previous = st.isOn
     st.isOn = on
     st.busy = true

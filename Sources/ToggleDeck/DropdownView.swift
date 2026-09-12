@@ -200,11 +200,17 @@ struct DropdownView: View {
     if scrolls {
       ScrollView { content }
         .frame(
-          maxHeight: DropdownLayout.availableHeight(
-            .init(showDescriptions: settings.showDescriptions)))
+          maxHeight: DropdownLayout.availableHeight(scrollMetrics))
     } else {
       content
     }
+  }
+
+  /// Same chrome allowance `pack` uses, so a visible banner shrinks the scroll area.
+  private var scrollMetrics: DropdownLayout.Metrics {
+    var metrics = DropdownLayout.Metrics(showDescriptions: settings.showDescriptions)
+    metrics.chromeHeight += engine.banner == nil ? 0 : 76
+    return metrics
   }
 
   private var footer: some View {

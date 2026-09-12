@@ -119,8 +119,10 @@ if [ "$WITH_LOGIN_ITEM" -eq 1 ]; then
 </dict>
 </plist>
 EOF
+    # Unload a previous job but don't bootstrap: RunAtLoad would start a copy
+    # here and `open` below would start a second one. launchd loads the plist
+    # at the next login.
     launchctl bootout "gui/$(id -u)/com.user.toggledeck" 2>/dev/null || true
-    launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null || launchctl load "$PLIST" 2>/dev/null || true
 fi
 
 if [ "$LAUNCH" -eq 1 ]; then

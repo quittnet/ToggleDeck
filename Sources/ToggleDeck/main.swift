@@ -58,7 +58,8 @@ if args.contains("--help") || args.contains("-h") {
 
 // Anything left over is a typo. Falling through to the menu bar app here would
 // hide the mistake behind a process that only ends when the user quits it.
-if args.count > 1 {
+let appArgumentCount = args.firstIndex(of: "--diagnose-popover").map { $0 + 2 <= args.count ? 2 : 1 } ?? 0
+if args.count - appArgumentCount > 1 {
   exit(
     CLI.argumentError("unrecognised arguments: \(args.dropFirst().joined(separator: " "))"))
 }
