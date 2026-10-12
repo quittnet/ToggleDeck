@@ -7,11 +7,19 @@ struct DropdownControlRow: View {
   let state: ToggleState
   let showDescriptions: Bool
   let isFocused: Bool
+  var snapshot = false
   let onToggle: () -> Void
-  @State private var hovered = false
+  @ViewState<Bool> private var hovered = false
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   private var disabled: Bool { !state.supported || state.stale || state.busy }
+
+  private var subtitle: String? {
+    if state.stale { return "Reading current state…" }
+    if state.error != nil { return "Could not apply · right-click to refresh" }
+    if !state.supported { return "Unavailable · refresh or check System Settings" }
+    return spec.menuSubtitle(showDescriptions: showDescriptions)
+  }
 
   var body: some View {
     Button(action: onToggle) {
@@ -27,7 +35,7 @@ struct DropdownControlRow: View {
             .font(.system(size: 13, weight: .medium))
             .foregroundStyle(state.supported ? .primary : .secondary)
             .lineLimit(1)
-          if let subtitle = spec.menuSubtitle(showDescriptions: showDescriptions) {
+          if let subtitle {
             Text(subtitle)
               .font(.system(size: 11))
               .foregroundStyle(.secondary)
@@ -36,8 +44,13 @@ struct DropdownControlRow: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
 
-        if state.busy {
-          ProgressView().controlSize(.small).frame(width: 38, height: 22)
+        if state.stale || state.busy {
+          if snapshot {
+            Circle().trim(from: 0.1, to: 0.85).stroke(Color.secondary, lineWidth: 1.5)
+              .frame(width: 14, height: 14).frame(width: 38, height: 22).accessibilityHidden(true)
+          } else {
+            ProgressView().controlSize(.small).frame(width: 38, height: 22)
+          }
         } else if !state.supported {
           Image(systemName: "minus.circle")
             .foregroundStyle(.secondary).frame(width: 38, height: 22)
@@ -65,17 +78,25 @@ struct DropdownControlRow: View {
         }
       }
     }
-    .buttonStyle(.plain)
-    .focusable()
+    .buttonStyle(DeckRowButtonStyle())
+    .focusable(!disabled)
     .focusEffectDisabled()
+    .onKeyPress(.space) {
+      guard !disabled else { return .ignored }
+      onToggle()
+      return .handled
+    }
     .disabled(disabled)
     .onHover { hovered = $0 }
     .help(state.error ?? (!state.supported ? "Not available on this Mac." : spec.menuHelp))
     .accessibilityLabel(spec.menuTitle)
     .accessibilityValue(
-      state.busy ? "Applying" : (!state.supported ? "Unavailable" : (state.isOn ? "On" : "Off"))
+      state.stale
+        ? "Reading"
+        : (state.busy
+          ? "Applying" : (!state.supported ? "Unavailable" : (state.isOn ? "On" : "Off")))
     )
-    .accessibilityHint(spec.menuHelp)
+    .accessibilityHint(state.error ?? spec.menuHelp)
     .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: state.isOn)
   }
 }

@@ -21,25 +21,47 @@ enum DropdownPreview {
     {
       app.applicationIconImage = NSWorkspace.shared.icon(forFile: appURL.path)
     }
-    let suite = "com.user.toggledeck.render.\(UUID().uuidString)"
-    let store = UserDefaults(suiteName: suite)!
-    defer { store.removePersistentDomain(forName: suite) }
-    let settings = AppSettings(store: store)
+    let settings = AppSettings.preview()
+    let cursor = CursorColorController.preview()
+    let pointer = PointerController.preview()
+    let audio = AudioController.preview()
     settings.pinned = Catalog.defaultPinned
     settings.groupDropdown = true
-    let engine = ToggleEngine.preview()
     for (name, scheme, search, descriptions) in [
       ("light", ColorScheme.light, "", false),
       ("dark", ColorScheme.dark, "", false),
       ("search", ColorScheme.light, "wifi", false),
       ("empty", ColorScheme.light, "doesnotexist", false),
       ("descriptions", ColorScheme.light, "", true),
+      ("loading", ColorScheme.light, "", false),
+      ("unavailable", ColorScheme.light, "true tone", false),
+      ("error", ColorScheme.light, "wifi", false),
+      ("awake", ColorScheme.dark, "", false),
+      ("cursor", ColorScheme.light, "cursor", false),
     ] {
+      var overrides: [String: ToggleState] = [:]
+      if name == "loading" {
+        overrides = Dictionary(uniqueKeysWithValues: Catalog.all.map { ($0.id, ToggleState()) })
+      }
+      if name == "unavailable" {
+        overrides["trueTone"] = ToggleState(supported: false, stale: false)
+      }
+      if name == "error" {
+        overrides["wifi"] = ToggleState(
+          isOn: true, error: "macOS could not apply the change. Refresh or check System Settings.",
+          stale: false)
+      }
+      if name == "awake" { overrides["keepAwake"] = ToggleState(isOn: true, stale: false) }
+      let engine = ToggleEngine.preview(
+        states: overrides, awakeUntil: name == "awake" ? Date().addingTimeInterval(1800) : nil)
+      if name == "error" {
+        engine.banner = "Wi-Fi: macOS could not apply the change. Refresh or check System Settings."
+      }
       app.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
       settings.showDescriptions = descriptions
       app.appearance?.performAsCurrentDrawingAppearance {
         let content = DropdownView(
-          engine: engine, settings: settings,
+          engine: engine, settings: settings, cursor: cursor, pointer: pointer, audio: audio,
           onOpenSettings: {}, onQuit: {}, snapshotSearch: search
         )
         .environment(\.colorScheme, scheme).fixedSize()
@@ -59,16 +81,21 @@ enum DropdownPreview {
     }
   }
 
+  @MainActor
   private final class PreviewDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var window: NSWindow?
+    private var settingsWindow: NSWindow?
+    private let pointer = PointerController.preview()
+    private let audio = AudioController.preview()
+    private let shortcut = GlobalShortcutController.preview()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-      let store = UserDefaults(suiteName: "com.user.toggledeck.preview")!
-      let settings = AppSettings(store: store)
+      let settings = AppSettings.preview()
       settings.pinned = Catalog.defaultPinned
       settings.groupDropdown = true
       settings.showDescriptions = false
       let engine = ToggleEngine.preview()
+      let cursor = CursorColorController.preview()
       let window = NSWindow(
         contentRect: NSRect(x: 0, y: 0, width: 720, height: 720),
         styleMask: [.titled, .closable], backing: .buffered, defer: false)
@@ -78,9 +105,22 @@ enum DropdownPreview {
       window.appearance = NSAppearance(named: .aqua)
       let view = NSHostingView(
         rootView: DropdownView(
-          engine: engine, settings: settings,
-          onOpenSettings: {}, onQuit: { NSApp.terminate(nil) },
-          onClose: { NSApp.terminate(nil) }))
+          engine: engine, settings: settings, cursor: cursor, pointer: pointer, audio: audio,
+          onOpenSettings: { [weak self] in
+            self?.showSettings(engine: engine, settings: settings, cursor: cursor)
+          },
+          onQuit: { NSApp.terminate(nil) },
+          onOpenCursorSettings: { [weak self] in
+            self?.showSettings(engine: engine, settings: settings, cursor: cursor, section: .cursor)
+          },
+          onOpenSoundSettings: { [weak self] in
+            self?.showSettings(engine: engine, settings: settings, cursor: cursor, section: .sound)
+          },
+          onClose: { NSApp.terminate(nil) },
+          onSizeChange: { [weak window] size in
+            guard size.width > 0, size.height > 0 else { return }
+            window?.setContentSize(size)
+          }))
       window.contentView = view
       view.layoutSubtreeIfNeeded()
       window.setContentSize(view.fittingSize)
@@ -98,6 +138,34 @@ enum DropdownPreview {
       appItem.submenu = appMenu
       mainMenu.addItem(appItem)
       NSApp.mainMenu = mainMenu
+    }
+
+    private func showSettings(
+      engine: ToggleEngine, settings: AppSettings, cursor: CursorColorController,
+      section: SettingsSection = .dropdown
+    ) {
+      if let settingsWindow {
+        settingsWindow.contentView = NSHostingView(
+          rootView: SettingsView(
+            initialSection: section, engine: engine, settings: settings, cursor: cursor,
+            pointer: pointer, audio: audio, shortcut: shortcut))
+        NSApp.activate(ignoringOtherApps: true)
+        settingsWindow.makeKeyAndOrderFront(nil)
+        return
+      }
+      let settingsWindow = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: 960, height: 660),
+        styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+      settingsWindow.title = "ToggleDeck Customize Preview"
+      settingsWindow.isReleasedWhenClosed = false
+      settingsWindow.contentView = NSHostingView(
+        rootView: SettingsView(
+          initialSection: section, engine: engine, settings: settings, cursor: cursor,
+          pointer: pointer, audio: audio, shortcut: shortcut))
+      settingsWindow.center()
+      NSApp.activate(ignoringOtherApps: true)
+      settingsWindow.makeKeyAndOrderFront(nil)
+      self.settingsWindow = settingsWindow
     }
 
     func windowWillClose(_ notification: Notification) { NSApp.terminate(nil) }

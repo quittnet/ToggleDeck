@@ -7,11 +7,15 @@ enum DropdownLayout {
   enum Item: Identifiable {
     case header(Category)
     case row(ToggleSpec)
+    case cursorColor
+    case audioOutput
 
     var id: String {
       switch self {
       case .header(let category): return "h:\(category.rawValue)"
       case .row(let spec): return "r:\(spec.id)"
+      case .cursorColor: return "c:cursorColor"
+      case .audioOutput: return "c:audioOutput"
       }
     }
   }
@@ -65,11 +69,11 @@ enum DropdownLayout {
     var metrics = Metrics(showDescriptions: showDescriptions)
     metrics.chromeHeight += extraChrome
     let width = screenSize?.width ?? layoutScreen?.visibleFrame.width ?? 1440
-    metrics.columnWidth = min(336, max(260, width - 48))
+    metrics.columnWidth = min(336, max(180, width - 48))
     let cap = maxColumns(metrics, screenSize: screenSize)
     let rows = items.filter {
-      if case .row = $0 { return true }
-      return false
+      if case .header = $0 { return false }
+      return true
     }.count
     let preferred = rows > 12 && cap >= 2 ? 2 : 1
     let limit = availableHeight(metrics, screenSize: screenSize)
@@ -88,6 +92,7 @@ enum DropdownLayout {
       case .header: return total + metrics.headerHeight
       case .row(let spec):
         return total + spec.menuHeight(showDescriptions: metrics.showDescriptions)
+      case .cursorColor, .audioOutput: return total + 40
       }
     }
   }

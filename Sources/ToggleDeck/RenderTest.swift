@@ -10,6 +10,14 @@ enum RenderTest {
   static func run(prefix: String) {
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
+    app.appearance = NSAppearance(named: .aqua)
+
+    let settingsModel = AppSettings.preview()
+    let engine = ToggleEngine.preview()
+    let cursor = CursorColorController.preview()
+    let pointer = PointerController.preview()
+    let audio = AudioController.preview()
+    let shortcut = GlobalShortcutController.preview()
 
     // Real windows, parked offscreen, so SwiftUI's .task and .searchable
     // behave as they do in the shipping app.
@@ -18,23 +26,40 @@ enum RenderTest {
     let dropdown = makeSelfSizingWindow(
       NSHostingView(
         rootView: DropdownView(
+          engine: engine, settings: settingsModel, cursor: cursor, pointer: pointer, audio: audio,
           onOpenSettings: {}, onQuit: {},
           previewSpecs: Catalog.defaultPinned.compactMap { Catalog.byID[$0] })))
     // Same view fed the whole catalog, to exercise the column wrap.
     let wide = makeSelfSizingWindow(
       NSHostingView(
         rootView: DropdownView(
+          engine: engine, settings: settingsModel, cursor: cursor, pointer: pointer, audio: audio,
           onOpenSettings: {}, onQuit: {},
           previewSpecs: Catalog.all)))
     let settings = makeWindow(
       size: NSSize(width: 960, height: 660),
-      view: NSHostingView(rootView: SettingsView()))
+      view: NSHostingView(
+        rootView: SettingsView(
+          engine: engine, settings: settingsModel, cursor: cursor,
+          pointer: pointer, audio: audio, shortcut: shortcut
+        ).environment(
+          \.colorScheme, .light)))
     let allSettings = makeWindow(
       size: NSSize(width: 960, height: 660),
-      view: NSHostingView(rootView: SettingsView(initialSection: .all)))
+      view: NSHostingView(
+        rootView: SettingsView(
+          initialSection: .all, engine: engine, settings: settingsModel, cursor: cursor,
+          pointer: pointer, audio: audio, shortcut: shortcut
+        )
+        .environment(\.colorScheme, .light)))
     let general = makeWindow(
       size: NSSize(width: 960, height: 660),
-      view: NSHostingView(rootView: SettingsView(initialSection: .general)))
+      view: NSHostingView(
+        rootView: SettingsView(
+          initialSection: .general, engine: engine, settings: settingsModel, cursor: cursor,
+          pointer: pointer, audio: audio, shortcut: shortcut
+        )
+        .environment(\.colorScheme, .light)))
 
     // Let the first refresh land so fittingSize is meaningful, then settle
     // the content at its final size. The resize happens before the long
@@ -88,6 +113,7 @@ enum RenderTest {
     // appearance, which resolves selection materials to flat black.
     window.appearance = NSAppearance(named: .aqua)
     window.contentView = view
+    view.appearance = NSAppearance(named: .aqua)
     window.setFrameOrigin(NSPoint(x: -20000, y: -20000))
     window.makeKeyAndOrderFront(nil)
     window.displayIfNeeded()

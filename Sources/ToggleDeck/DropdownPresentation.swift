@@ -17,6 +17,9 @@ extension ToggleSpec {
     case "darkMode": return "moon.fill"
     case "nightShift": return "sun.haze.fill"
     case "trueTone": return "sun.max.fill"
+    case "reduceMotion": return "figure.walk.motion"
+    case "reduceTransparency": return "square.on.square"
+    case "squareWindowCorners": return "macwindow"
     case "wifi": return "wifi"
     case "bluetooth": return "antenna.radiowaves.left.and.right"
     case "muteOutput": return "speaker.slash.fill"
@@ -40,8 +43,9 @@ extension ToggleSpec {
 
   func menuSubtitle(showDescriptions: Bool) -> String? {
     if showDescriptions && !detail.isEmpty { return detail }
-    if requires.contains(.admin) { return "Password required" }
+    if requires.contains(.admin) { return "May request authorization" }
     if requires.contains(.logout) { return "Log out to apply" }
+    if requires.contains(.mayNeedAppRestart) { return "May need app restart" }
     return nil
   }
 

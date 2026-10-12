@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 @MainActor
@@ -9,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
   private var refreshTimer: Timer?
   /// Dismisses the popover on a click anywhere outside it.
   private var globalMonitor: Any?
+  private var stateObservation: AnyCancellable?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     NSApp.setActivationPolicy(.accessory)
@@ -17,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     if let button = statusItem.button {
       button.image = SwitchGlyph.statusItemImage()
       button.image?.accessibilityDescription = "ToggleDeck"
+      button.toolTip = "ToggleDeck · Mac controls"
       button.action = #selector(statusItemClicked(_:))
       button.target = self
       button.sendAction(on: [.leftMouseDown, .rightMouseUp])
@@ -31,6 +34,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
       rootView: DropdownView(
         onOpenSettings: { [weak self] in self?.openSettings() },
         onQuit: { NSApp.terminate(nil) },
+        onOpenCursorSettings: { [weak self] in self?.showSettings(initialSection: .cursor) },
+        onOpenSoundSettings: { [weak self] in self?.showSettings(initialSection: .sound) },
         onClose: { [weak self] in self?.popover.performClose(nil) },
         onSizeChange: { [weak self] in self?.resizePopover(to: $0) }
       )
@@ -43,7 +48,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     host.sizingOptions = [.standardBounds, .preferredContentSize]
     popover.contentViewController = host
 
+    stateObservation = ToggleEngine.shared.$states
+      .map { $0["keepAwake"]?.isOn == true }.removeDuplicates()
+      .sink { [weak self] awake in
+        guard let button = self?.statusItem.button else { return }
+        button.image =
+          awake
+          ? NSImage(
+            systemSymbolName: "cup.and.saucer.fill",
+            accessibilityDescription: "ToggleDeck: Keep Awake active")
+          : SwitchGlyph.statusItemImage()
+        button.image?.isTemplate = true
+        button.toolTip = awake ? "ToggleDeck · Keep Awake active" : "ToggleDeck · Mac controls"
+      }
     Task { await ToggleEngine.shared.refreshAll() }
+    GlobalShortcutController.shared.start { [weak self] in self?.togglePopover() }
     startRefreshTimer()
 
     if let i = CommandLine.arguments.firstIndex(of: "--diagnose-popover"),
@@ -107,6 +126,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
   }
 
   func applicationWillTerminate(_ notification: Notification) {
+    refreshTimer?.invalidate()
+    removeGlobalMonitor()
+    stateObservation?.cancel()
+    GlobalShortcutController.shared.shutdown()
     ToggleEngine.shared.flushRestarts()
     Bridges.shared.shutdown()
   }
@@ -166,6 +189,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
       popover.performClose(nil)
     } else {
       Task { await ToggleEngine.shared.refreshAll() }
+      Task { await PointerController.shared.refresh(clearError: false) }
+      Task { await AudioController.shared.refresh(clearError: false) }
       adoptCurrentScreen()
       preparePopoverSize()
       popover.show(relativeTo: button.bounds, of: button, preferredEdge: Self.statusItemEdge)
@@ -229,15 +254,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
   }
 
   @objc private func refreshNow() {
-    Task { await ToggleEngine.shared.refreshAll() }
+    Task {
+      await CursorColorController.shared.refresh()
+      await PointerController.shared.refresh()
+      await AudioController.shared.refresh()
+      await ToggleEngine.shared.refreshAll()
+    }
   }
 
   // MARK: Settings window
 
   @objc func openSettings() {
+    showSettings()
+  }
+
+  func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool
+  {
+    openSettings()
+    return true
+  }
+
+  private func showSettings(initialSection: SettingsSection? = nil) {
     popover.performClose(nil)
 
     if let window = settingsWindow {
+      if let initialSection {
+        window.contentViewController = NSHostingController(
+          rootView: SettingsView(initialSection: initialSection))
+      }
       NSApp.activate(ignoringOtherApps: true)
       window.makeKeyAndOrderFront(nil)
       return
@@ -249,7 +293,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
       backing: .buffered, defer: false
     )
     window.title = "ToggleDeck Settings"
-    window.contentViewController = NSHostingController(rootView: SettingsView())
+    window.contentViewController = NSHostingController(
+      rootView: SettingsView(initialSection: initialSection ?? .dropdown))
     window.isReleasedWhenClosed = false
     window.center()
     window.setFrameAutosaveName("ToggleDeckSettings")
@@ -269,6 +314,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         guard let self, AppSettings.shared.autoRefresh else { return }
         let windowVisible = self.settingsWindow?.isVisible ?? false
         guard self.popover.isShown || windowVisible else { return }
+        await CursorColorController.shared.refresh(clearError: false)
+        await PointerController.shared.refresh(clearError: false)
+        await AudioController.shared.refresh(clearError: false)
         await ToggleEngine.shared.refreshAll()
       }
     }

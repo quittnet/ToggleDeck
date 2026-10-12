@@ -20,6 +20,7 @@ for arg in "$@"; do
         --no-login-item) WITH_LOGIN_ITEM=0 ;;
         --no-launch)     LAUNCH=0 ;;
         --regen-icon)    REGEN_ICON=1 ;;
+        *) printf 'Unknown option: %s\n' "$arg" >&2; exit 2 ;;
     esac
 done
 
@@ -61,9 +62,9 @@ cat > "$STAGED_APP/Contents/Info.plist" << 'EOF'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.2</string>
+    <string>2.7.0</string>
     <key>CFBundleVersion</key>
-    <string>4</string>
+    <string>15</string>
     <key>CFBundleIconFile</key>
     <string>ToggleDeckIcon-v21</string>
     <key>LSMinimumSystemVersion</key>
@@ -133,6 +134,6 @@ cat << EOF
 
 Installed to: $APP
 
-20 everyday settings. Use Customize to choose your menu controls.
+23 everyday switches plus cursor and sound controls. Use Customize to choose your menu controls.
 macOS may request Automation or Bluetooth permission when a control needs it.
 EOF

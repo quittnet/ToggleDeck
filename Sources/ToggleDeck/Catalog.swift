@@ -70,14 +70,11 @@ enum Parse {
   static let truthy: @Sendable (ShellResult) -> Bool? = { r in
     guard r.ok else { return nil }
     let s = r.out.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-    if s.isEmpty { return nil }
-    if s.hasPrefix("1") || s.hasPrefix("true") || s.hasPrefix("on") || s.hasPrefix("yes") {
-      return true
+    switch s {
+    case "1", "true", "on", "yes", "enabled": return true
+    case "0", "false", "off", "no", "disabled": return false
+    default: return nil
     }
-    if s.hasPrefix("0") || s.hasPrefix("false") || s.hasPrefix("off") || s.hasPrefix("no") {
-      return false
-    }
-    return nil
   }
 
   /// Substring test with an explicit negative token so "disabled" never reads
@@ -97,7 +94,7 @@ enum Parse {
     guard r.ok else { return nil }
     let s = r.out.trimmingCharacters(in: .whitespacesAndNewlines)
     if s.isEmpty { return false }
-    return s.hasPrefix("1")
+    return s == "1" ? true : (s == "0" ? false : nil)
   }
 
   /// Same as pmsetFlag but absence means the hardware lacks the feature.
@@ -105,7 +102,7 @@ enum Parse {
     guard r.ok else { return nil }
     let s = r.out.trimmingCharacters(in: .whitespacesAndNewlines)
     if s.isEmpty { return nil }
-    return s.hasPrefix("1")
+    return s == "1" ? true : (s == "0" ? false : nil)
   }
 }
 
@@ -127,6 +124,10 @@ enum Catalog {
     display + connections + power + desktop + finder + input + screenshots
   static let byID = Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0) })
   static let defaultPinned = all.map(\.id)
+  static let version26DefaultPinned = all.filter { $0.id != "squareWindowCorners" }.map(\.id)
+  static let versionTwoDefaultPinned = all.filter {
+    $0.id != "reduceMotion" && $0.id != "reduceTransparency" && $0.id != "squareWindowCorners"
+  }.map(\.id)
   static let previousDefaultPinned = [
     "lowPowerMode", "keepAwake", "bluetooth", "wifi", "darkMode", "nightShift",
     "stageManager", "dockAutohide", "menuBarAutohide", "showHiddenFiles",
@@ -149,6 +150,21 @@ enum Catalog {
     br(
       "trueTone", "True Tone", "Adapts white balance to the ambient light.", .display,
       .trueTone, kw: ["white balance", "ambient"]),
+
+    br(
+      "reduceMotion", "Reduce Motion", "Reduces movement and animations across macOS.", .display,
+      .reduceMotion, req: [.fullDisk], kw: ["animation", "accessibility", "movement"]),
+
+    br(
+      "reduceTransparency", "Reduce Transparency", "Makes translucent backgrounds more solid.",
+      .display, .reduceTransparency, req: [.fullDisk],
+      kw: ["glass", "opaque", "accessibility", "background"]),
+
+    d(
+      "squareWindowCorners", "Square Window Corners",
+      "Sets radius to 1. Off restores defaults. Apps may need to restart.",
+      .display, "NSGlobalDomain", "NSConvolutionOverride1", v: .floatOverride(on: 1),
+      req: [.mayNeedAppRestart], kw: ["rounded", "radius", "window", "corners", "square"]),
 
   ]
 
@@ -210,10 +226,16 @@ enum Catalog {
       "com.apple.WindowManager", "GloballyEnabled", restart: [.windowManager],
       kw: ["stage", "windows"]),
 
-    d(
+    sh(
       "showDesktopIcons", "Show Icons on Desktop",
-      "Draws mounted volumes and files on the wallpaper.", .desktop,
-      "com.apple.finder", "CreateDesktop", def: true, restart: [.finder], kw: ["desktop", "clean"]),
+      "Shows desktop items. Turning this off keeps Finder's desktop menu available.", .desktop,
+      read: "/usr/bin/defaults read com.apple.WindowManager StandardHideDesktopIcons",
+      on:
+        "/usr/bin/defaults write com.apple.finder CreateDesktop -bool true && /usr/bin/defaults write com.apple.WindowManager StandardHideDesktopIcons -bool false",
+      off:
+        "/usr/bin/defaults write com.apple.finder CreateDesktop -bool true && /usr/bin/defaults write com.apple.WindowManager StandardHideDesktopIcons -bool true",
+      parse: { result in Parse.truthy(result).map { !$0 } }, def: true, restart: [.finder, .dock],
+      kw: ["desktop", "clean", "icons", "context menu"]),
 
     d(
       "menuBarAutohide", "Auto-Hide Menu Bar",
@@ -260,7 +282,8 @@ enum Catalog {
 
     d(
       "autoCorrect", "Autocorrect",
-      "", .input, "NSGlobalDomain", "NSAutomaticSpellingCorrectionEnabled",
+      "Corrects spelling automatically while you type.", .input, "NSGlobalDomain",
+      "NSAutomaticSpellingCorrectionEnabled",
       def: true, kw: ["autocorrect", "spelling"]),
 
   ]

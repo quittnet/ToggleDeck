@@ -35,6 +35,12 @@ if let i = CommandLine.arguments.firstIndex(of: "--render"), i + 1 < CommandLine
 }
 
 let args = CommandLine.arguments
+if let i = args.firstIndex(of: "--cursor-colors") {
+  guard args.count <= i + 2 else {
+    exit(CLI.argumentError("--cursor-colors accepts at most one value."))
+  }
+  exit(CLI.cursorColors(i + 1 < args.count ? args[i + 1] : nil))
+}
 if let i = args.firstIndex(of: "--make-icon") {
   guard i + 1 < args.count else { exit(CLI.argumentError("--make-icon needs an output path.")) }
   exit(IconGenerator.run(output: args[i + 1]))

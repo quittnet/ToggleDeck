@@ -6,31 +6,32 @@ import Foundation
 final class AppSettings: ObservableObject {
   static let shared = AppSettings()
 
-  private let store: UserDefaults
+  private let store: UserDefaults?
+  private let managesLoginItem: Bool
   /// Set while the observer is writing a read-back correction, so that write
   /// does not re-enter the observer and touch launchd a second time.
   private var applyingLoginItem = false
 
   /// IDs shown in the menu bar dropdown, in display order.
-  @Published var pinned: [String] { didSet { store.set(pinned, forKey: "pinned") } }
+  @Published var pinned: [String] { didSet { store?.set(pinned, forKey: "pinned") } }
   /// Restart Dock/Finder/Control Center automatically after a write that needs it.
   @Published var restartServices: Bool {
-    didSet { store.set(restartServices, forKey: "restartServices") }
+    didSet { store?.set(restartServices, forKey: "restartServices") }
   }
   /// Show the one-line explanation under each switch in the dropdown.
   @Published var showDescriptions: Bool {
-    didSet { store.set(showDescriptions, forKey: "showDescriptions") }
+    didSet { store?.set(showDescriptions, forKey: "showDescriptions") }
   }
   /// Group the dropdown by category instead of showing one flat list.
   @Published var groupDropdown: Bool {
-    didSet { store.set(groupDropdown, forKey: "groupDropdown") }
+    didSet { store?.set(groupDropdown, forKey: "groupDropdown") }
   }
   /// Re-read every setting on a timer while a window is open.
-  @Published var autoRefresh: Bool { didSet { store.set(autoRefresh, forKey: "autoRefresh") } }
+  @Published var autoRefresh: Bool { didSet { store?.set(autoRefresh, forKey: "autoRefresh") } }
 
   @Published var launchAtLogin: Bool {
     didSet {
-      guard !applyingLoginItem else { return }
+      guard managesLoginItem, !applyingLoginItem else { return }
       // No early-out on `launchAtLogin != LoginItem.isEnabled`. That test
       // only asks whether the plist file exists, so an agent left pointing
       // at a stale binary path could never be rewritten — login would keep
@@ -46,20 +47,27 @@ final class AppSettings: ObservableObject {
     }
   }
 
-  init(store: UserDefaults = .standard) {
+  init(store: UserDefaults? = UserDefaults.standard, manageLoginItem: Bool = true) {
     self.store = store
-    pinned = Self.migratedPins(store.array(forKey: "pinned") as? [String])
-    restartServices = store.object(forKey: "restartServices") as? Bool ?? true
-    showDescriptions = store.object(forKey: "showDescriptions") as? Bool ?? false
-    groupDropdown = store.object(forKey: "groupDropdown") as? Bool ?? true
-    autoRefresh = store.object(forKey: "autoRefresh") as? Bool ?? true
-    launchAtLogin = LoginItem.isEnabled
+    managesLoginItem = manageLoginItem && store != nil
+    pinned = Self.migratedPins(store?.array(forKey: "pinned") as? [String])
+    restartServices = store?.object(forKey: "restartServices") as? Bool ?? true
+    showDescriptions = store?.object(forKey: "showDescriptions") as? Bool ?? false
+    groupDropdown = store?.object(forKey: "groupDropdown") as? Bool ?? true
+    autoRefresh = store?.object(forKey: "autoRefresh") as? Bool ?? true
+    launchAtLogin = managesLoginItem && LoginItem.isEnabled
 
-    store.set(pinned, forKey: "pinned")
+    store?.set(pinned, forKey: "pinned")
   }
+
+  /// Purely in-memory preferences for previews, with no launchd access.
+  static func preview() -> AppSettings { AppSettings(store: nil, manageLoginItem: false) }
 
   nonisolated static func migratedPins(_ saved: [String]?) -> [String] {
     guard let saved else { return Catalog.defaultPinned }
+    if saved == Catalog.versionTwoDefaultPinned || saved == Catalog.version26DefaultPinned {
+      return Catalog.defaultPinned
+    }
     if Array(saved.prefix(Catalog.previousDefaultPinned.count)) == Catalog.previousDefaultPinned {
       let extras = saved.dropFirst(Catalog.previousDefaultPinned.count)
       var seen = Set(Catalog.defaultPinned)
@@ -87,6 +95,17 @@ final class AppSettings: ObservableObject {
 
   func movePinned(from source: IndexSet, to destination: Int) {
     pinned.move(fromOffsets: source, toOffset: destination)
+    // Category grouping deliberately imposes category order. A custom move
+    // switches to the saved order so the menu follows what the user arranged.
+    groupDropdown = false
+  }
+
+  func movePin(_ id: String, by offset: Int) {
+    guard let index = pinned.firstIndex(of: id) else { return }
+    let target = index + offset
+    guard pinned.indices.contains(target) else { return }
+    pinned.swapAt(index, target)
+    groupDropdown = false
   }
 
   func resetPinned() { pinned = Catalog.defaultPinned }

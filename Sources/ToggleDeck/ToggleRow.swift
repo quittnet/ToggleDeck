@@ -10,18 +10,27 @@ struct ToggleRow: View {
   var showPin = false
   var showDetail = true
   var showCategory = false
+  var showMove = false
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   private var st: ToggleState { engine.state(spec.id) }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 3) {
-      HStack(alignment: .center, spacing: 8) {
+      HStack(alignment: .center, spacing: 10) {
+        Image(systemName: spec.menuSymbol)
+          .font(.system(size: 17, weight: .medium))
+          .foregroundStyle(
+            st.isOn && st.supported && !st.stale ? Color.accentColor : Color.secondary
+          )
+          .frame(width: 26).accessibilityHidden(true)
         if showPin {
           Button {
             settings.togglePin(spec.id)
           } label: {
             Image(systemName: settings.isPinned(spec.id) ? "pin.fill" : "pin")
-              .font(.system(size: 11))
+              .font(.system(size: 12))
+              .frame(width: 28, height: 30)
               .foregroundStyle(settings.isPinned(spec.id) ? Color.accentColor : Color.secondary)
           }
           .buttonStyle(.plain)
@@ -35,8 +44,8 @@ struct ToggleRow: View {
 
         VStack(alignment: .leading, spacing: 1) {
           HStack(spacing: 5) {
-            Text(spec.title)
-              .font(.system(size: 12.5))
+            Text(spec.menuTitle)
+              .font(.system(size: 13, weight: .medium))
               .foregroundStyle(st.supported ? .primary : .secondary)
               .lineLimit(1)
 
@@ -60,7 +69,8 @@ struct ToggleRow: View {
             Text(spec.category.rawValue)
               .font(.system(size: 10))
               .foregroundStyle(.tertiary)
-          } else if showDetail, !spec.detail.isEmpty {
+          }
+          if showDetail, !spec.detail.isEmpty {
             Text(spec.detail)
               .font(.system(size: 10.5))
               .foregroundStyle(.secondary)
@@ -71,7 +81,26 @@ struct ToggleRow: View {
 
         Spacer(minLength: 6)
 
-        if st.busy {
+        if showMove {
+          HStack(spacing: 2) {
+            Button {
+              settings.movePin(spec.id, by: -1)
+            } label: {
+              Image(systemName: "chevron.up")
+            }
+            .disabled(settings.pinned.first == spec.id).accessibilityLabel(
+              "Move \(spec.menuTitle) up")
+            Button {
+              settings.movePin(spec.id, by: 1)
+            } label: {
+              Image(systemName: "chevron.down")
+            }
+            .disabled(settings.pinned.last == spec.id).accessibilityLabel(
+              "Move \(spec.menuTitle) down")
+          }.buttonStyle(DeckButtonStyle()).font(.system(size: 10)).frame(width: 42)
+        }
+
+        if st.busy || st.stale {
           ProgressView()
             .controlSize(.small)
             .scaleEffect(0.7)
@@ -101,9 +130,11 @@ struct ToggleRow: View {
           .fixedSize(horizontal: false, vertical: true)
       }
     }
-    .padding(.vertical, 4)
+    .padding(.vertical, showDetail ? 10 : 6)
     .contentShape(Rectangle())
     .opacity(st.stale ? 0.55 : 1)
-    .animation(.easeOut(duration: 0.12), value: st.isOn)
+    .accessibilityElement(children: .contain)
+    .contextMenu { ControlContextMenu(spec: spec, engine: engine, settings: settings) }
+    .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: st.isOn)
   }
 }

@@ -4,6 +4,8 @@ import SwiftUI
 enum SettingsSection: Hashable {
   case general
   case dropdown
+  case cursor
+  case sound
   case all
   case category(Category)
 
@@ -11,6 +13,8 @@ enum SettingsSection: Hashable {
     switch self {
     case .general: return "General"
     case .dropdown: return "Your Menu"
+    case .cursor: return "Cursor"
+    case .sound: return "Sound"
     case .all: return "Everyday Settings"
     case .category(let c): return c.rawValue
     }
@@ -20,6 +24,8 @@ enum SettingsSection: Hashable {
     switch self {
     case .general: return "gearshape"
     case .dropdown: return "menubar.arrow.down.rectangle"
+    case .cursor: return "cursorarrow"
+    case .sound: return "speaker.wave.2"
     case .all: return "square.grid.2x2"
     case .category(let c): return c.symbol
     }
@@ -28,13 +34,29 @@ enum SettingsSection: Hashable {
 
 @MainActor
 struct SettingsView: View {
-  @ObservedObject var engine = ToggleEngine.shared
-  @ObservedObject var settings = AppSettings.shared
+  @ObservedObject var engine: ToggleEngine
+  @ObservedObject var settings: AppSettings
+  @ObservedObject var cursor: CursorColorController
+  @ObservedObject var pointer: PointerController
+  @ObservedObject var audio: AudioController
+  @ObservedObject var shortcut: GlobalShortcutController
 
-  @State private var section: SettingsSection
-  @State private var query = ""
+  @ViewState<SettingsSection> private var section: SettingsSection
+  @ViewState<String> private var query = ""
+  @FocusState private var searchFocused: Bool
 
-  init(initialSection: SettingsSection = .dropdown) {
+  init(
+    initialSection: SettingsSection = .dropdown, engine: ToggleEngine = .shared,
+    settings: AppSettings = .shared, cursor: CursorColorController = .shared,
+    pointer: PointerController = .shared, audio: AudioController = .shared,
+    shortcut: GlobalShortcutController = .shared
+  ) {
+    self.engine = engine
+    self.settings = settings
+    self.cursor = cursor
+    self.pointer = pointer
+    self.audio = audio
+    self.shortcut = shortcut
     _section = State(initialValue: initialSection)
   }
 
@@ -42,11 +64,18 @@ struct SettingsView: View {
     NavigationSplitView {
       sidebar
     } detail: {
-      detail
-        .frame(minWidth: 520)
+      VStack(spacing: 0) {
+        detail
+        if engine.banner != nil { FeedbackView(engine: engine).padding(16) }
+      }.frame(minWidth: 520)
     }
     .frame(minWidth: 860, minHeight: 600)
     .task { await engine.refreshAll() }
+    .onChange(of: section) { _, _ in query = "" }
+    .onExitCommand { query = "" }
+    .background {
+      Button("") { searchFocused = true }.keyboardShortcut("f", modifiers: .command).hidden()
+    }
   }
 
   // MARK: Sidebar
@@ -56,6 +85,8 @@ struct SettingsView: View {
       Section {
         row(.general)
         row(.dropdown)
+        row(.cursor)
+        row(.sound)
         row(.all)
       }
       Section("Categories") {
@@ -68,7 +99,7 @@ struct SettingsView: View {
     .frame(minWidth: 218)
     .safeAreaInset(edge: .bottom) {
       HStack {
-        Text("\(Catalog.all.count) settings")
+        Text("\(Catalog.all.count) toggles + cursor + sound")
           .font(.system(size: 10.5))
           .foregroundStyle(.secondary)
         Spacer()
@@ -76,7 +107,12 @@ struct SettingsView: View {
           ProgressView().controlSize(.small).scaleEffect(0.6)
         }
         Button {
-          Task { await engine.refreshAll() }
+          Task {
+            await cursor.refresh()
+            await pointer.refresh()
+            await audio.refresh()
+            await engine.refreshAll()
+          }
         } label: {
           Image(systemName: "arrow.clockwise").font(.system(size: 10))
         }
@@ -106,8 +142,10 @@ struct SettingsView: View {
   @ViewBuilder
   private var detail: some View {
     switch section {
-    case .general: GeneralPane(settings: settings, engine: engine)
+    case .general: GeneralPane(settings: settings, engine: engine, shortcut: shortcut)
     case .dropdown: DropdownPane(settings: settings, engine: engine)
+    case .cursor: CursorColorsPane(cursor: cursor, pointer: pointer)
+    case .sound: AudioPane(audio: audio)
     case .all: listPane(Catalog.all, title: "Everyday Settings", showCategory: true)
     case .category(let cat):
       listPane(Catalog.all.filter { $0.category == cat }, title: cat.rawValue, showCategory: false)
@@ -115,14 +153,13 @@ struct SettingsView: View {
   }
 
   private func listPane(_ specs: [ToggleSpec], title: String, showCategory: Bool) -> some View {
-    let needle = query.lowercased().trimmingCharacters(in: .whitespaces)
-    let filtered = needle.isEmpty ? specs : specs.filter { $0.searchBlob.contains(needle) }
+    let filtered = SettingSearch.results(in: specs, query: query)
 
     return VStack(spacing: 0) {
       paneHeader(
         title: title,
         subtitle:
-          "\(filtered.count) of \(specs.count) shown. Pin the controls you want in your menu.",
+          "Add controls to your menu with the pin button. Right-click for more options.",
         search: true)
 
       if filtered.isEmpty {
@@ -163,7 +200,8 @@ struct SettingsView: View {
           Image(systemName: "magnifyingglass")
             .font(.system(size: 11)).foregroundStyle(.secondary)
           TextField("Search settings", text: $query)
-            .textFieldStyle(.plain)
+            .textFieldStyle(.plain).focused($searchFocused)
+            .accessibilityLabel("Search settings")
             .font(.system(size: 12))
             .frame(width: 170)
           if !query.isEmpty {
@@ -173,7 +211,7 @@ struct SettingsView: View {
               Image(systemName: "xmark.circle.fill")
                 .font(.system(size: 10)).foregroundStyle(.secondary)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.plain).accessibilityLabel("Clear search")
           }
         }
         .padding(.horizontal, 8).padding(.vertical, 5)
@@ -196,12 +234,19 @@ private struct DropdownPane: View {
     VStack(spacing: 0) {
       VStack(alignment: .leading, spacing: 2) {
         Text("Your Menu").font(.system(size: 17, weight: .semibold))
-        Text("Your shortcuts in the menu bar. Drag to reorder; unpin to remove.")
+        Text("Drag or use the arrows to reorder. Use the pin button to remove a control.")
           .font(.system(size: 11)).foregroundStyle(.secondary)
       }
       .frame(maxWidth: .infinity, alignment: .leading)
       .padding(.horizontal, 18).padding(.top, 16).padding(.bottom, 10)
       .accessibilityAddTraits(.isHeader)
+
+      HStack {
+        Toggle("Organize by category", isOn: $settings.groupDropdown).toggleStyle(.checkbox)
+        Spacer()
+        Text(settings.groupDropdown ? "Category order" : "Your custom order")
+          .foregroundStyle(.secondary)
+      }.font(.system(size: 12)).padding(.horizontal, 18).padding(.bottom, 12)
 
       if settings.pinned.isEmpty {
         ContentUnavailableView(
@@ -213,7 +258,7 @@ private struct DropdownPane: View {
           ForEach(settings.pinnedSpecs) { spec in
             ToggleRow(
               spec: spec, engine: engine, settings: settings,
-              showPin: true, showDetail: false, showCategory: true)
+              showPin: true, showDetail: false, showCategory: true, showMove: true)
           }
           .onMove { settings.movePinned(from: $0, to: $1) }
         }
@@ -239,20 +284,23 @@ private struct DropdownPane: View {
 private struct GeneralPane: View {
   @ObservedObject var settings: AppSettings
   @ObservedObject var engine: ToggleEngine
+  @ObservedObject var shortcut: GlobalShortcutController
 
   var body: some View {
     Form {
-      Section("ToggleDeck") {
+      Section("Menu & Startup") {
         Toggle("Launch at login", isOn: $settings.launchAtLogin)
         Toggle("Group menu controls by category", isOn: $settings.groupDropdown)
         Toggle("Show descriptions in the menu", isOn: $settings.showDescriptions)
         Toggle("Refresh controls automatically", isOn: $settings.autoRefresh)
       }
 
+      GlobalShortcutView(controller: shortcut)
+
       Section {
         Toggle("Restart affected apps automatically", isOn: $settings.restartServices)
         Text(
-          "Dock, Finder and Control Center only pick up some changes after a relaunch. Turning this off leaves those changes pending until you restart the app yourself. Relaunching Finder closes its open windows."
+          "Dock, Finder and Control Center only pick up some changes after a relaunch. Turning this off leaves those changes pending until you restart the app yourself. Relaunching Finder may interrupt open Finder windows."
         )
         .font(.system(size: 10.5)).foregroundStyle(.secondary)
       } header: {
@@ -272,10 +320,13 @@ private struct GeneralPane: View {
       }
 
       Section("Everyday Settings") {
-        Text("All 20 controls start in your menu. Unpin any you do not need.")
-        Button("Open System Settings…") {
-          openPane("x-apple.systempreferences:")
-        }
+        Text(
+          "All \(Catalog.all.count) toggles start in your menu, alongside cursor and sound controls. Search finds unpinned controls too. Right-click a toggle to pin it or open System Settings."
+        )
+        Text(
+          "Keep Awake offers 15, 30, 60, or 120 minute sessions. Right-click its row to choose a duration."
+        )
+        Button("Open System Settings…") { SystemSettingsLink.open() }
       }
 
     }

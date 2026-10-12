@@ -10,6 +10,52 @@ import Foundation
 /// Writes go through the same verify-after-write path as the switches, so a
 /// silently rejected change exits non-zero instead of reporting success.
 enum CLI {
+  static func cursorColors(_ argument: String?) -> Int32 {
+    func report(_ message: String, code: Int32) -> Int32 {
+      FileHandle.standardError.write(Data((message + "\n").utf8))
+      return code
+    }
+    if let argument {
+      let requested: CursorColors
+      if let preset = CursorPreset.allCases.first(where: {
+        $0.rawValue.lowercased() == argument.lowercased()
+      }) {
+        requested = preset.colors
+      } else if let data = argument.data(using: .utf8),
+        let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        let fill = object["fill"] as? [String: Any],
+        let outline = object["outline"] as? [String: Any],
+        let fillColor = CursorRGB(components: fill),
+        let outlineColor = CursorRGB(components: outline),
+        let customized = object["customized"] as? Bool
+      {
+        requested = CursorColors(fill: fillColor, outline: outlineColor, customized: customized)
+      } else {
+        return report("Use a cursor color preset or a cursor color JSON snapshot.", code: 2)
+      }
+      if let error = CursorSystemColors.write(requested) { return report(error, code: 4) }
+      guard let actual = CursorSystemColors.read(), actual.matches(requested),
+        actual.customized == requested.customized
+      else {
+        return report("Could not confirm the cursor colors.", code: 5)
+      }
+    }
+    guard let colors = CursorSystemColors.read() else {
+      return report("Cursor colors are unavailable on this Mac.", code: 3)
+    }
+    func components(_ value: CursorRGB) -> [String: Double] {
+      ["red": value.red, "green": value.green, "blue": value.blue, "alpha": value.alpha]
+    }
+    let object: [String: Any] = [
+      "fill": components(colors.fill), "outline": components(colors.outline),
+      "customized": colors.customized,
+    ]
+    guard let data = try? JSONSerialization.data(withJSONObject: object, options: .sortedKeys),
+      let output = String(data: data, encoding: .utf8)
+    else { return report("Could not encode cursor colors.", code: 5) }
+    print(output)
+    return 0
+  }
 
   static func parseBoolean(_ value: String) -> Bool? {
     switch value.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) {
@@ -78,9 +124,7 @@ enum CLI {
   }
 
   static func list(_ filter: String?) -> Int32 {
-    let needle = filter?.lowercased()
-    for spec in Catalog.all {
-      if let needle, !spec.searchBlob.contains(needle) { continue }
+    for spec in SettingSearch.results(in: Catalog.all, query: filter ?? "") {
       let flags = spec.requires.badges.map(\.0).joined(separator: ",")
       print(
         "\(spec.id.padding(toLength: 30, withPad: " ", startingAt: 0)) "
@@ -98,6 +142,7 @@ enum CLI {
       --get <id>              print 1 or 0
       --set <id> <1|0>        change a setting, verified after writing
       --list [filter]         list setting ids
+      --cursor-colors [preset|JSON]  read or change pointer colors
       --selftest [--verbose] [--out PATH]
       --render <prefix>       write UI screenshots (debugging)
     """

@@ -13,6 +13,8 @@ let package = Package(
                 .linkedFramework("SwiftUI"),
                 .linkedFramework("IOKit"),
                 .linkedFramework("ServiceManagement"),
+                .linkedFramework("CoreAudio"),
+                .linkedFramework("Carbon"),
             ]
         ),
         .testTarget(name: "ToggleDeckTests", dependencies: ["ToggleDeck"]),

@@ -343,6 +343,8 @@ final class Bridges: @unchecked Sendable {
     case .trueTone: return trueToneSupported()
     case .caffeinate: return true
     case .darkMode: return true
+    case .reduceMotion: return AccessibilitySystemSettings.read(.reduceMotion) != nil
+    case .reduceTransparency: return AccessibilitySystemSettings.read(.reduceTransparency) != nil
     }
   }
 
@@ -353,6 +355,8 @@ final class Bridges: @unchecked Sendable {
     case .trueTone: return trueToneIsOn()
     case .caffeinate: return caffeinateIsOn()
     case .darkMode: return darkModeIsOn()
+    case .reduceMotion: return AccessibilitySystemSettings.read(.reduceMotion)
+    case .reduceTransparency: return AccessibilitySystemSettings.read(.reduceTransparency)
     }
   }
 
@@ -363,6 +367,9 @@ final class Bridges: @unchecked Sendable {
     case .trueTone: return setTrueTone(on)
     case .caffeinate: return setCaffeinate(on)
     case .darkMode: return setDarkMode(on)
+    case .reduceMotion: return AccessibilitySystemSettings.write(.reduceMotion, enabled: on)
+    case .reduceTransparency:
+      return AccessibilitySystemSettings.write(.reduceTransparency, enabled: on)
     }
   }
 }

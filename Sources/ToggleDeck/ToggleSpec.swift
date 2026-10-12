@@ -29,22 +29,26 @@ enum Category: String, CaseIterable, Identifiable, Codable, Sendable {
 
 struct Requirements: OptionSet, Sendable {
   let rawValue: Int
-  static let admin = Requirements(rawValue: 1 << 0)  // prompts for your password
+  static let admin = Requirements(rawValue: 1 << 0)  // needs administrator authorization
   static let fullDisk = Requirements(rawValue: 1 << 1)  // needs Full Disk Access
   static let automation = Requirements(rawValue: 1 << 2)  // needs Automation (AppleScript)
   static let restartApp = Requirements(rawValue: 1 << 3)  // affected app relaunches
   static let logout = Requirements(rawValue: 1 << 4)  // needs log out / restart
   static let appleSilicon = Requirements(rawValue: 1 << 5)
   static let laptopOnly = Requirements(rawValue: 1 << 6)
+  static let mayNeedAppRestart = Requirements(rawValue: 1 << 7)
 
   var badges: [(String, String)] {  // (label, SF symbol)
     var out: [(String, String)] = []
-    if contains(.admin) { out.append(("Password", "key.fill")) }
+    if contains(.admin) { out.append(("Administrator access", "key.fill")) }
     if contains(.fullDisk) {
       out.append(("Full Disk Access", "externaldrive.fill.badge.person.crop"))
     }
     if contains(.automation) { out.append(("Automation", "gearshape.2.fill")) }
     if contains(.restartApp) { out.append(("Relaunches app", "arrow.clockwise")) }
+    if contains(.mayNeedAppRestart) {
+      out.append(("May need app restart", "arrow.clockwise"))
+    }
     if contains(.logout) { out.append(("Log out required", "person.crop.circle.badge.xmark")) }
     if contains(.laptopOnly) { out.append(("Laptop only", "laptopcomputer")) }
     return out
@@ -83,11 +87,16 @@ enum PrefValue: Sendable {
   case invertedBoolean
   case intMap(on: Int, off: Int)
   case stringMap(on: String, off: String)
+  /// ON writes a floating-point override; OFF removes the key to restore macOS defaults.
+  case floatOverride(on: Double)
   /// Any of these ints counts as ON; writes use `on` / `off`.
   case intSet(onValues: Set<Int>, on: Int, off: Int)
 
-  func isOn(_ raw: Any?) -> Bool? {
-    guard let raw else { return nil }
+  func isOn(_ raw: Any?, verifyingWrite: Bool = false) -> Bool? {
+    guard let raw else {
+      if case .floatOverride = self { return false }
+      return nil
+    }
     switch self {
     case .boolean:
       return Self.asBool(raw)
@@ -100,14 +109,27 @@ enum PrefValue: Sendable {
     case .intSet(let onValues, _, _):
       guard let i = Self.asInt(raw) else { return nil }
       return onValues.contains(i)
+    case .floatOverride(let on):
+      let number: Double?
+      if let n = raw as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID() {
+        number = n.doubleValue
+      } else if let s = raw as? String {
+        number = Double(s.trimmingCharacters(in: .whitespacesAndNewlines))
+      } else {
+        number = nil
+      }
+      guard let number, number.isFinite else { return nil }
+      // A nonmatching override reads as OFF, but does not prove that deletion succeeded.
+      if verifyingWrite && number != on { return nil }
+      return number == on
     case .stringMap(let on, _):
       guard let s = raw as? String else { return nil }
       return s.caseInsensitiveCompare(on) == .orderedSame
     }
   }
 
-  /// The `defaults write` type flag and literal for a given switch position.
-  func writeLiteral(on: Bool) -> (flag: String, value: String) {
+  /// The `defaults write` type flag and literal, or nil when the key must be deleted.
+  func writeLiteral(on: Bool) -> (flag: String, value: String)? {
     switch self {
     case .boolean:
       return ("-bool", on ? "true" : "false")
@@ -117,6 +139,8 @@ enum PrefValue: Sendable {
       return ("-int", String(on ? onV : offV))
     case .intSet(_, let onV, let offV):
       return ("-int", String(on ? onV : offV))
+    case .floatOverride(let value):
+      return on ? ("-float", String(value)) : nil
     case .stringMap(let onV, let offV):
       return ("-string", Shell.quote(on ? onV : offV))
     }
@@ -158,6 +182,8 @@ enum Bridge: String, Sendable {
   case trueTone
   case caffeinate
   case darkMode
+  case reduceMotion
+  case reduceTransparency
 }
 
 enum Backend: Sendable {
