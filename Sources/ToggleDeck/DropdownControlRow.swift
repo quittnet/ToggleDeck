@@ -21,7 +21,9 @@ struct DropdownControlRow: View {
   private var subtitle: String? {
     if state.stale { return "Reading current state…" }
     if state.error != nil { return "Could not apply · right-click to refresh" }
-    if !state.supported { return "Unavailable · refresh or check System Settings" }
+    if !state.supported {
+      return spec.unavailableNote ?? "Unavailable · refresh or check System Settings"
+    }
     return spec.menuSubtitle(showDescriptions: showDescriptions)
   }
 

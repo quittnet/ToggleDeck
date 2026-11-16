@@ -1,6 +1,6 @@
-# ToggleDeck 2.9.0
+# ToggleDeck 2.11.0
 
-A menu bar app with 23 everyday Mac switches, cursor controls, and a Sound dropdown. All switches are pinned by default; Customize lets you remove and reorder them. Search also finds cursor, pointer, fill, outline, color presets, pointer size, audio outputs, and saved combination names.
+A menu bar app with 23 everyday Mac switches, two optional controls for Hammerspoon users, cursor controls, and a Sound dropdown. All switches are pinned by default; Customize lets you remove and reorder them. Search also finds cursor, pointer, fill, outline, color presets, pointer size, audio outputs, and saved combination names.
 
 ## Settings
 
@@ -9,10 +9,10 @@ A menu bar app with 23 everyday Mac switches, cursor controls, and a Sound dropd
 | Display | Dark Mode, Night Shift, True Tone, Reduce Motion, Reduce Transparency, Square Window Corners; cursor colors, pointer size, shake to find |
 | Sound & Connections | Wi-Fi, Bluetooth, Mute Sound; audio output and volume |
 | Power | Low Power Mode, Keep Awake |
-| Dock & Desktop | Auto-Hide Dock, Show Recent Applications, Stage Manager, Show Icons on Desktop, Auto-Hide Menu Bar |
+| Dock & Desktop | Auto-Hide Dock, Dock Needs Command (optional), Show Recent Applications, Stage Manager, Show Icons on Desktop, Auto-Hide Menu Bar |
 | Finder | Show Hidden Files, Show All File Extensions, Show Path Bar |
 | Typing & Trackpad | Tap to Click, Natural Scrolling, Autocorrect |
-| Screenshots | Screenshot Preview |
+| Screenshots | Screenshot Preview, Copy Screenshots to Clipboard (optional) |
 
 The earlier broad catalog was reduced to everyday controls, removing developer tweaks, remote services, security overrides, legacy settings, the duplicate spelling switch, and the keyboard remapper that replaced unrelated mappings. Removing a control does not change its macOS preference. Use System Settings for options outside this list.
 
@@ -20,7 +20,7 @@ The earlier broad catalog was reduced to everyday controls, removing developer t
 
 Click the menu bar icon to open or close the menu. Right-click for Customize, Refresh, and Quit. Search finds a retained control even when it is not pinned. The menu uses two balanced columns for the available controls, keeps each category together, and adapts its column count and scrolling to the display. Search results shrink to a single column. Entire rows are clickable, with visible hover and keyboard focus. Command-F focuses search, Command-R refreshes, and Escape clears search or closes the menu. Arrow keys move between controls; Space activates the focused control.
 
-The default menu contains every retained control, in category order. Reset to Defaults restores all 23. Custom arrangements retain their order across launches. Retired IDs and duplicate pins are removed without changing system settings.
+The default menu contains every retained control, in category order. Reset to Defaults restores all 23. The two optional Hammerspoon controls, Dock Needs Command and Copy Screenshots to Clipboard, are not part of the default menu; pin them in Customize. Custom arrangements retain their order across launches. Retired IDs and duplicate pins are removed without changing system settings.
 
 The new app icon is packaged from `AppIcon.png`. The installer includes the source artwork and all macOS icon sizes. `--regen-icon` rebuilds the icon from that artwork.
 
@@ -65,6 +65,14 @@ A saved default menu adds this control on upgrade. Custom menu order and intenti
 - Refresh pressed during an automatic refresh is queued instead of ignored. The menu opens on your controls with search and filter cleared. Customize opens Your Menu. Arrow keys move between the search field and the controls, and a control keeps keyboard focus after Space.
 - Show Icons on Desktop works on accounts that have never changed it. Mute Sound is unavailable on outputs without a mute control. Dark Mode waits for the first Automation prompt, and Bluetooth waits for the radio to settle before reporting a failure.
 - `--set` and `--toggle` follow the "Restart affected apps automatically" preference. An extra or unknown argument after any command prints the usage text and exits 2. `--selftest` exits 1 when its report cannot be written.
+
+## New in 2.11
+
+- Copy Screenshots to Clipboard copies every new screenshot to the clipboard, as an image and as a file, and keeps the file. It drives a Hammerspoon script that `init.lua` loads as `Z.shotClip` from the `shotclip` module, in the same way as Dock Needs Command: the switch reads whether the script's watcher is running, turning it off stops it, and turning it on loads it again. Only screenshots taken after it is turned on are copied. It is unavailable when Hammerspoon is not running, the `hs` tool is missing, or the script is not loaded, it returns to on when Hammerspoon reloads, and it is not pinned by default.
+
+## New in 2.10
+
+- Dock Needs Command makes the Dock appear only while you hold Command with the pointer at the bottom of the screen. It drives a Hammerspoon script that keeps `Z.commandDock` (an event tap and a `stop()` function) and loads the `command-dock` module, through Hammerspoon's `hs` command-line tool. The switch reads whether that script is running, turning it off stops it, and turning it on loads it again. It is unavailable when Hammerspoon is not running, the `hs` tool is missing, or the script is not loaded. Hammerspoon starts the script again when it reloads or restarts, so the switch returns to on then. Keep Auto-Hide Dock on. The control is not pinned by default; pin it in Customize.
 
 ## New in 2.9
 

@@ -62,9 +62,9 @@ cat > "$STAGED_APP/Contents/Info.plist" << 'EOF'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.9.0</string>
+    <string>2.11.0</string>
     <key>CFBundleVersion</key>
-    <string>18</string>
+    <string>20</string>
     <key>CFBundleIconFile</key>
     <string>ToggleDeckIcon-v21</string>
     <key>LSMinimumSystemVersion</key>
@@ -139,6 +139,6 @@ cat << EOF
 
 Installed to: $APP
 
-23 everyday switches plus cursor and sound controls. Use Customize to choose your menu controls.
+23 everyday switches (plus two optional Hammerspoon controls) and cursor and sound controls. Use Customize to choose your menu controls.
 macOS may request Automation or Bluetooth permission when a control needs it.
 EOF

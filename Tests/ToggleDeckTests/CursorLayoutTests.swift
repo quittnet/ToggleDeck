@@ -26,10 +26,10 @@ struct CursorLayoutTests {
         return nil
       }
       #expect(boolIDs.count == 23)
-      #expect(Set(boolIDs) == Set(Catalog.all.map(\.id)))
+      #expect(Set(boolIDs) == Set(Catalog.defaultSpecs.map(\.id)))
       #expect(packed.filter { $0.id == DropdownLayout.Item.cursorColor.id }.count == 1)
       #expect(packed.filter { $0.id == DropdownLayout.Item.audioOutput.id }.count == 1)
-      #expect(packed.count == Catalog.all.count + 2 + Category.allCases.count)
+      #expect(packed.count == Catalog.defaultSpecs.count + 2 + Category.allCases.count)
       #expect(Set(packed.map(\.id)).count == packed.count)
       let categories = packed.compactMap { item -> ToggleDeck.Category? in
         if case .header(let category) = item { return category }
@@ -53,7 +53,7 @@ struct CursorLayoutTests {
           if case .row(let spec) = item, spec.category == category { return spec.id }
           return nil
         }
-        #expect(categoryIDs == Catalog.all.filter { $0.category == category }.map(\.id))
+        #expect(categoryIDs == Catalog.defaultSpecs.filter { $0.category == category }.map(\.id))
       }
     }
   }
@@ -104,7 +104,7 @@ struct CursorLayoutTests {
   @MainActor
   private func groupedItems() -> [DropdownLayout.Item] {
     Category.allCases.flatMap { category -> [DropdownLayout.Item] in
-      let controls = Catalog.all.filter { $0.category == category }.map {
+      let controls = Catalog.defaultSpecs.filter { $0.category == category }.map {
         DropdownLayout.Item.row($0)
       }
       return [.header(category)] + controls + (category == .display ? [.cursorColor] : [])

@@ -33,6 +33,7 @@ extension ToggleSpec {
     case "lowPowerMode": return "battery.50percent"
     case "keepAwake": return "cup.and.saucer.fill"
     case "dockAutohide": return "dock.rectangle"
+    case "dockCommand": return "command.square.fill"
     case "dockRecents": return "clock.fill"
     case "stageManager": return "rectangle.leadinghalf.inset.filled"
     case "showDesktopIcons": return "desktopcomputer"
@@ -44,6 +45,7 @@ extension ToggleSpec {
     case "naturalScrolling": return "arrow.up.arrow.down"
     case "autoCorrect": return "character.cursor.ibeam"
     case "screenshotThumbnail": return "camera.viewfinder"
+    case "screenshotClipboard": return "doc.on.clipboard.fill"
     default: return category.symbol
     }
   }

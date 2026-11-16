@@ -214,6 +214,12 @@ struct ToggleSpec: Identifiable, Sendable {
   /// falling back to `systemDefault`. Used for hardware-dependent settings such
   /// as High Power Mode, which simply do not appear in `pmset` on most Macs.
   var unsupportedIfUnreadable: Bool = false
+  /// Left out of the default menu because it needs software ToggleDeck does
+  /// not install. It stays in the catalog, so Customize can pin it, and a
+  /// menu that already includes it keeps it.
+  var optIn: Bool = false
+  /// Shown in place of the generic reason when the row is unavailable.
+  var unavailableNote: String?
   /// Extra search terms so "wifi", "dark", "ssh" etc. find the right row.
   var keywords: [String] = []
 

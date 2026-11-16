@@ -41,7 +41,8 @@ private func sh(
   read: String, on: String, off: String,
   parse: @escaping @Sendable (ShellResult) -> Bool? = Parse.truthy,
   def: Bool = false, restart: [Service] = [], req: Requirements = [],
-  hardwareGated: Bool = false, kw: [String] = []
+  hardwareGated: Bool = false, optIn: Bool = false, unavailable: String? = nil,
+  kw: [String] = []
 ) -> ToggleSpec {
   var r = req
   if !restart.isEmpty { r.insert(.restartApp) }
@@ -49,7 +50,8 @@ private func sh(
     id: id, title: title, detail: detail, category: cat,
     backend: .shell(read: read, on: on, off: off, parse: parse),
     systemDefault: def, requires: r, restarts: restart,
-    unsupportedIfUnreadable: hardwareGated, keywords: kw)
+    unsupportedIfUnreadable: hardwareGated, optIn: optIn, unavailableNote: unavailable,
+    keywords: kw)
 }
 
 private func br(
@@ -59,6 +61,19 @@ private func br(
   ToggleSpec(
     id: id, title: title, detail: detail, category: cat,
     backend: .bridge(bridge), requires: req, keywords: kw)
+}
+
+/// A control backed by a script in the user's Hammerspoon. It is opt-in, and
+/// unavailable whenever Hammerspoon or the script is not there.
+private func hm(
+  _ id: String, _ title: String, _ detail: String, _ cat: Category,
+  _ module: Hammerspoon.Module, kw: [String] = []
+) -> ToggleSpec {
+  sh(
+    id, title, detail, cat,
+    read: Hammerspoon.command(module.read), on: Hammerspoon.command(module.on),
+    off: Hammerspoon.command(module.off),
+    hardwareGated: true, optIn: true, unavailable: Hammerspoon.unavailableNote, kw: kw)
 }
 
 // MARK: - Output parsers for shell-backed toggles
@@ -126,9 +141,13 @@ enum Catalog {
   static let all: [ToggleSpec] =
     display + connections + power + desktop + finder + input + screenshots
   static let byID = Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0) })
-  static let defaultPinned = all.map(\.id)
-  static let version26DefaultPinned = all.filter { $0.id != "squareWindowCorners" }.map(\.id)
-  static let versionTwoDefaultPinned = all.filter {
+  /// Every control a fresh install pins. Opt-in controls are not part of any
+  /// default, current or past, so a menu is never reset onto one.
+  static let defaultSpecs = all.filter { !$0.optIn }
+  static let defaultPinned = defaultSpecs.map(\.id)
+  static let version26DefaultPinned = defaultSpecs.filter { $0.id != "squareWindowCorners" }.map(
+    \.id)
+  static let versionTwoDefaultPinned = defaultSpecs.filter {
     $0.id != "reduceMotion" && $0.id != "reduceTransparency" && $0.id != "squareWindowCorners"
   }.map(\.id)
   static let previousDefaultPinned = [
@@ -221,6 +240,12 @@ enum Catalog {
       "Slides the Dock away until the pointer reaches the edge.", .desktop,
       "com.apple.dock", "autohide", restart: [.dock], kw: ["hide", "dock"]),
 
+    hm(
+      "dockCommand", "Dock Needs Command",
+      "The Dock appears only while you hold Command with the pointer at the bottom of the screen. Needs the Hammerspoon command-dock script, and turns back on when Hammerspoon reloads.",
+      .desktop, Hammerspoon.commandDock,
+      kw: ["hammerspoon", "command", "cmd", "bottom", "edge", "dock", "hover", "reveal"]),
+
     d(
       "dockRecents", "Show Recent Applications",
       "Adds a trailing section of recently used apps.", .desktop,
@@ -299,7 +324,13 @@ enum Catalog {
       "screenshotThumbnail", "Screenshot Preview",
       "The preview that appears in the corner after a capture.", .screenshots,
       "com.apple.screencapture", "show-thumbnail", def: true,
-      restart: [.systemUIServer], kw: ["preview", "thumbnail"])
+      restart: [.systemUIServer], kw: ["preview", "thumbnail"]),
+
+    hm(
+      "screenshotClipboard", "Copy Screenshots to Clipboard",
+      "Copies every new screenshot to the clipboard, as an image and as a file, and keeps the file. Needs the Hammerspoon shotclip script, and turns back on when Hammerspoon reloads.",
+      .screenshots, Hammerspoon.screenshotClipboard,
+      kw: ["screenshot", "clipboard", "copy", "paste", "capture", "hammerspoon", "shotclip"]),
 
   ]
 

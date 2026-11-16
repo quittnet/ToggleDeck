@@ -10,7 +10,8 @@ struct ToggleDeckTests {
   func testAllControlsFitOnLaptopAndDesktop() async {
     await MainActor.run {
       let items = Category.allCases.flatMap { category -> [DropdownLayout.Item] in
-        [.header(category)] + Catalog.all.filter { $0.category == category }.map { .row($0) }
+        [.header(category)]
+          + Catalog.defaultSpecs.filter { $0.category == category }.map { .row($0) }
       }
       // Without the cursor and sound rows the toggles alone fit two columns
       // on a 752pt laptop; a shorter screen still wraps to three.
@@ -46,7 +47,8 @@ struct ToggleDeckTests {
   func testDescriptionsScrollWithoutSplittingCategories() async {
     await MainActor.run {
       let items = Category.allCases.flatMap { category -> [DropdownLayout.Item] in
-        [.header(category)] + Catalog.all.filter { $0.category == category }.map { .row($0) }
+        [.header(category)]
+          + Catalog.defaultSpecs.filter { $0.category == category }.map { .row($0) }
       }
       let result = DropdownLayout.pack(
         items, showDescriptions: true,
@@ -60,7 +62,7 @@ struct ToggleDeckTests {
   @Test
   func testFlatColumnsPreserveCustomOrder() async {
     await MainActor.run {
-      let specs = Array(Catalog.all.reversed())
+      let specs = Array(Catalog.defaultSpecs.reversed())
       let result = DropdownLayout.pack(
         specs.map { .row($0) }, showDescriptions: false,
         screenSize: CGSize(width: 1280, height: 752))
@@ -99,10 +101,12 @@ struct ToggleDeckTests {
 
   @Test
   func testCuratedCatalogHasOnlyEverydayControls() {
-    #expect(Catalog.all.count == 23)
-    #expect(Catalog.byID.count == 23)
+    // 23 pinned by default, plus the two opt-in Hammerspoon controls.
+    #expect(Catalog.all.count == 25)
+    #expect(Catalog.byID.count == 25)
     #expect(Catalog.defaultPinned.count == 23)
-    #expect(Set(Catalog.defaultPinned) == Set(Catalog.all.map(\.id)))
+    #expect(Set(Catalog.defaultPinned) == Set(Catalog.all.filter { !$0.optIn }.map(\.id)))
+    #expect(Set(Catalog.all.filter(\.optIn).map(\.id)) == ["dockCommand", "screenshotClipboard"])
     for id in Catalog.defaultPinned { #expect(Catalog.byID[id] != nil) }
     for id in ["capsLockEscape", "autoSpellCheck", "firewall", "remoteLogin", "quarantineWarning"] {
       #expect(Catalog.byID[id] == nil)
