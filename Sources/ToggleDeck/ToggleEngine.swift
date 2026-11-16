@@ -33,7 +33,11 @@ final class ToggleEngine: ObservableObject {
   private let writer: Writer?
   private let verificationDelay: UInt64
   private var revisions: [String: UInt64] = [:]
+  /// Value the user last asked for. A later read that matches it retires the failure.
+  private var requested: [String: Bool] = [:]
   private var awakeTask: Task<Void, Never>?
+  /// Set when an explicit Refresh arrives while another pass is running.
+  private var pendingClearingRefresh = false
 
   init(
     preview: Bool = false, reader: Reader? = nil, writer: Writer? = nil,
@@ -88,22 +92,9 @@ final class ToggleEngine: ObservableObject {
         st.supported = false
       }
 
-    case .shell(let readCmd, _, _, let parse):
-      let r = Shell.run(readCmd, timeout: 5)
-      let parsed = (parse ?? Parse.truthy)(r)
-      if let parsed {
-        st.isOn = parsed
-      } else if !verifyingWrite && !spec.unsupportedIfUnreadable
-        && Self.isMissingPreference(command: readCmd, result: r)
-      {
-        st.isOn = spec.systemDefault
-      } else if verifyingWrite || spec.unsupportedIfUnreadable || !r.ok {
-        // -1 launch failure, -2 timeout: the command never produced an answer.
-        st.supported = false
-        st.isOn = spec.systemDefault
-      } else {
-        st.isOn = spec.systemDefault
-      }
+    case .shell(let readCmd, _, _, _):
+      return shellState(
+        spec, result: Shell.run(readCmd, timeout: 5), verifyingWrite: verifyingWrite)
 
     case .bridge(let bridge):
       // Read first, then ask about support: the Bluetooth bridge answers
@@ -119,10 +110,39 @@ final class ToggleEngine: ObservableObject {
     return st
   }
 
+  /// Turns a shell-backed spec's read output into a state. Kept apart from
+  /// `read` so the decision can be tested without running the command.
+  nonisolated static func shellState(
+    _ spec: ToggleSpec, result r: ShellResult, verifyingWrite: Bool = false
+  ) -> ToggleState {
+    var st = ToggleState()
+    st.stale = false
+    guard case .shell(let readCmd, _, _, let parse) = spec.backend else {
+      st.supported = false
+      return st
+    }
+    let parsed = (parse ?? Parse.truthy)(r)
+    if let parsed {
+      st.isOn = parsed
+    } else if !verifyingWrite && !spec.unsupportedIfUnreadable
+      && Self.isMissingPreference(command: readCmd, result: r)
+    {
+      st.isOn = spec.systemDefault
+    } else if verifyingWrite || spec.unsupportedIfUnreadable || !r.ok {
+      // -1 launch failure, -2 timeout: the command never produced an answer.
+      st.supported = false
+      st.isOn = spec.systemDefault
+    } else {
+      st.isOn = spec.systemDefault
+    }
+    return st
+  }
+
   /// An absent defaults key is the documented system default, not missing hardware.
+  /// Shares `Prefs.isMissingKeyError` so both paths accept every wording macOS
+  /// has used for it, including the current "Could not find key".
   nonisolated static func isMissingPreference(command: String, result: ShellResult) -> Bool {
-    command.hasPrefix("/usr/bin/defaults read ") && result.status == 1
-      && result.err.contains("does not exist")
+    command.hasPrefix("/usr/bin/defaults read ") && Prefs.isMissingKeyError(result)
   }
 
   /// True when the spec's read touches only in-process CFPreferences and can
@@ -130,7 +150,7 @@ final class ToggleEngine: ObservableObject {
   private nonisolated static func isCheapRead(_ spec: ToggleSpec) -> Bool {
     switch spec.backend {
     case .defaults, .multiDefaults: return true
-    case .bridge(let b): return b != .bluetooth
+    case .bridge: return false
     case .shell: return false
     }
   }
@@ -140,19 +160,44 @@ final class ToggleEngine: ObservableObject {
     startedAt == current && !busy
   }
 
-  func refreshAll() async {
+  /// `clearError` is for an explicit Refresh. Automatic reads keep a failure
+  /// until the Mac reports the value the user asked for.
+  func refreshAll(clearError: Bool = false) async {
     guard !isPreview else { return }
-    guard !isRefreshing else { return }
+    guard !isRefreshing else {
+      // An explicit Refresh pressed while the dropdown's automatic pass is
+      // still waiting on Bluetooth must not vanish: the running pass cannot
+      // clear errors, so queue one clearing pass behind it. Repeated presses
+      // coalesce into that single pass.
+      if clearError { pendingClearingRefresh = true }
+      return
+    }
+    // Held across the follow-up pass too, so the spinner does not blink off
+    // between the two.
     isRefreshing = true
     defer { isRefreshing = false }
+    var clear = clearError
+    while true {
+      await refreshPass(clearError: clear)
+      guard pendingClearingRefresh else { break }
+      pendingClearingRefresh = false
+      clear = true
+    }
+  }
+
+  private func refreshPass(clearError: Bool) async {
     let started = revisions
     let cheap = reader == nil ? Catalog.all.filter { Self.isCheapRead($0) } : []
     let costly = Catalog.all.filter { spec in !cheap.contains { $0.id == spec.id } }
 
     for spec in cheap where !state(spec.id).busy {
-      var value = Self.read(spec)
-      value.error = state(spec.id).error
-      states[spec.id] = value
+      let value = Self.read(spec)
+      guard
+        Self.acceptsRead(
+          startedAt: started[spec.id, default: 0],
+          current: revisions[spec.id, default: 0], busy: state(spec.id).busy)
+      else { continue }
+      storeRead(spec.id, value, clearError: clearError)
     }
 
     let reader = self.reader
@@ -172,15 +217,13 @@ final class ToggleEngine: ObservableObject {
             startedAt: started[id, default: 0],
             current: revisions[id, default: 0], busy: state(id).busy)
         else { continue }
-        var next = value
-        next.error = state(id).error
-        states[id] = next
+        storeRead(id, value, clearError: clearError)
       }
     }
     lastRefreshed = Date()
   }
 
-  func refresh(_ id: String) async {
+  func refresh(_ id: String, clearError: Bool = true) async {
     guard !isPreview, let spec = Catalog.byID[id], !state(id).busy else { return }
     let revision = revisions[id, default: 0]
     let reader = self.reader
@@ -195,7 +238,24 @@ final class ToggleEngine: ObservableObject {
         startedAt: revision, current: revisions[id, default: 0],
         busy: state(id).busy)
     else { return }
-    states[id] = value
+    storeRead(id, value, clearError: clearError)
+  }
+
+  /// Keeps a failed write visible until Refresh, or until the read matches it.
+  private func storeRead(_ id: String, _ value: ToggleState, clearError: Bool) {
+    var next = value
+    let matched = value.supported && !value.stale && requested[id] == value.isOn
+    if clearError || matched {
+      next.error = nil
+      requested[id] = nil
+      if bannerControlID == id {
+        banner = nil
+        bannerControlID = nil
+      }
+    } else {
+      next.error = state(id).error
+    }
+    states[id] = next
   }
 
   /// Timed sessions live in this process and never survive quitting the app.
@@ -247,6 +307,7 @@ final class ToggleEngine: ObservableObject {
     guard !st.busy else { return }
 
     revisions[id, default: 0] += 1
+    requested[id] = on
 
     // Show the new position immediately; correct it if the write is rejected.
     let previous = st.isOn
@@ -278,34 +339,60 @@ final class ToggleEngine: ObservableObject {
 
     // Re-read to confirm. Preference daemons and pmset apply asynchronously,
     // so give them a moment before checking.
-    try? await Task.sleep(nanoseconds: verificationDelay)
-    let verified: ToggleState
-    if let reader {
-      verified = await reader(spec, true)
-    } else {
-      verified = await Task.detached { Self.read(spec, verifyingWrite: true) }.value
-    }
+    let verified = await Self.verify(
+      spec, requested: on, delay: verificationDelay, reader: reader)
 
     var s = verified
     s.busy = false
     if let error = Self.verificationError(spec, requested: on, actual: verified) {
       s.error = error
+      // A failed readback is not proof that supported hardware disappeared.
+      // Keep the control retryable and retain the last known state if unreadable.
+      if !verified.supported || verified.stale {
+        s.supported = st.supported
+        s.stale = false
+        s.isOn = previous
+      }
       bannerControlID = id
       banner = "\(spec.title): \(s.error ?? "the change did not stick.")"
     }
     revisions[id, default: 0] += 1
     states[id] = s
-    if s.error == nil, bannerControlID == id {
-      banner = nil
-      bannerControlID = nil
+    if s.error == nil {
+      requested[id] = nil
+      if bannerControlID == id {
+        banner = nil
+        bannerControlID = nil
+      }
     }
     if id == "keepAwake", s.error == nil { clearAwakeDeadline() }
+  }
+
+  /// Poll without repeating the write. Daemons can report an old value briefly,
+  /// including while a coalesced service restart is still pending.
+  nonisolated static func verify(
+    _ spec: ToggleSpec, requested: Bool, delay: UInt64 = 350_000_000,
+    reader: Reader? = nil
+  ) async -> ToggleState {
+    var latest = ToggleState()
+    let deadline = ContinuousClock.now.advanced(by: .seconds(4))
+    for _ in 0..<12 {
+      do { try await Task.sleep(nanoseconds: delay) } catch { break }
+      if let reader {
+        latest = await reader(spec, true)
+      } else {
+        latest = await Task.detached { Self.read(spec, verifyingWrite: true) }.value
+      }
+      if verificationError(spec, requested: requested, actual: latest) == nil { break }
+      if ContinuousClock.now >= deadline { break }
+    }
+    return latest
   }
 
   nonisolated static func verificationError(
     _ spec: ToggleSpec, requested: Bool, actual: ToggleState
   ) -> String? {
-    guard actual.supported else {
+    guard actual.supported, !actual.stale else {
       return "Could not confirm the change. Refresh the control or check System Settings."
     }
     return actual.isOn == requested ? nil : rejectionReason(spec)

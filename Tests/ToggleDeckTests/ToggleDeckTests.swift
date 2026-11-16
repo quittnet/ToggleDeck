@@ -12,8 +12,11 @@ struct ToggleDeckTests {
       let items = Category.allCases.flatMap { category -> [DropdownLayout.Item] in
         [.header(category)] + Catalog.all.filter { $0.category == category }.map { .row($0) }
       }
+      // Without the cursor and sound rows the toggles alone fit two columns
+      // on a 752pt laptop; a shorter screen still wraps to three.
       for (size, columns) in [
-        (CGSize(width: 1280, height: 752), 3), (CGSize(width: 1920, height: 1156), 2),
+        (CGSize(width: 1280, height: 752), 2), (CGSize(width: 1280, height: 640), 3),
+        (CGSize(width: 1920, height: 1156), 2),
       ] {
         let result = DropdownLayout.pack(items, showDescriptions: false, screenSize: size)
         #expect(result.columns.count == columns)
@@ -47,7 +50,7 @@ struct ToggleDeckTests {
       }
       let result = DropdownLayout.pack(
         items, showDescriptions: true,
-        screenSize: CGSize(width: 1280, height: 752))
+        screenSize: CGSize(width: 1280, height: 600))
       #expect(result.overflowed)
       #expect(result.width <= 1280)
       #expect(result.columns.flatMap { $0 }.count == 30)
@@ -172,9 +175,9 @@ struct ToggleDeckTests {
   }
 
   @Test
-  func testInvalidCLIInputIsRejectedBeforeAnyWrite() {
-    #expect(CLI.set("darkMode", "banana") == 2)
-    #expect(CLI.set("capsLockEscape", "1") == 2)
+  func testInvalidCLIInputIsRejectedBeforeAnyWrite() async {
+    #expect(await CLI.set("darkMode", "banana") == 2)
+    #expect(await CLI.set("capsLockEscape", "1") == 2)
   }
 
   @Test
@@ -183,10 +186,10 @@ struct ToggleDeckTests {
   }
 
   @Test
-  func testCLIRefusesProcessLocalKeepAwake() {
+  func testCLIRefusesProcessLocalKeepAwake() async {
     #expect(CLI.get("keepAwake") == 3)
-    #expect(CLI.set("keepAwake", "1") == 3)
-    #expect(CLI.set("keepAwake", "0") == 3)
+    #expect(await CLI.set("keepAwake", "1") == 3)
+    #expect(await CLI.set("keepAwake", "0") == 3)
   }
 
   @Test

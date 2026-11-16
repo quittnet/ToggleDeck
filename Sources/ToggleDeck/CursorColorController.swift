@@ -18,6 +18,8 @@ final class CursorColorController: ObservableObject {
   private let writer: Writer
   private let isPreview: Bool
   private var revision: UInt64 = 0
+  private var queuedRefresh = false
+  private var queuedClearError = false
   private var colorObservation: AnyCancellable?
   private var paletteObservation: AnyCancellable?
   let palettes: CursorPaletteStore
@@ -59,10 +61,20 @@ final class CursorColorController: ObservableObject {
   }
 
   func refresh(clearError: Bool = true) async {
-    guard !isPreview, !isRefreshing, !isApplying else { return }
+    guard !isPreview else { return }
+    // A change notification during a read or write must not be lost: the
+    // in-flight read may predate it. Replay once when the operation ends.
+    if isApplying || isRefreshing {
+      queuedRefresh = true
+      queuedClearError = queuedClearError || clearError
+      return
+    }
     isRefreshing = true
     let started = revision
-    defer { isRefreshing = false }
+    defer {
+      isRefreshing = false
+      runQueuedRefresh()
+    }
     let value = await reader()
     guard started == revision, !isApplying else { return }
     isLoading = false
@@ -93,8 +105,19 @@ final class CursorColorController: ObservableObject {
     }
     isApplying = true
     error = nil
-    defer { isApplying = false }
+    defer {
+      isApplying = false
+      runQueuedRefresh()
+    }
     if let failure = await writer(requested) {
+      // The native setter can change WindowServer before persistence fails and
+      // the rollback is not guaranteed, so never assume the old colors.
+      if let actual = await reader(), actual.isValid {
+        colors = actual
+        available = true
+      } else {
+        available = false
+      }
       error = failure
       return
     }
@@ -116,5 +139,13 @@ final class CursorColorController: ObservableObject {
       palettes.matching(colors) == nil
     else { return }
     palettes.save(colors)
+  }
+
+  private func runQueuedRefresh() {
+    guard queuedRefresh, !isApplying, !isRefreshing else { return }
+    let clearError = queuedClearError
+    queuedRefresh = false
+    queuedClearError = false
+    Task { @MainActor [weak self] in await self?.refresh(clearError: clearError) }
   }
 }

@@ -6,6 +6,8 @@ struct AudioMenuRow: View {
   @ObservedObject var audio: AudioController
   var snapshot = false
   var onOpenSettings: () -> Void = {}
+  /// Set by the dropdown while keyboard focus is on this row.
+  var isFocused = false
   @ViewState<Bool> private var showing = false
 
   var body: some View {
@@ -18,16 +20,24 @@ struct AudioMenuRow: View {
         } label: {
           label
         }
-        .buttonStyle(DeckRowButtonStyle())
+        .buttonStyle(DeckRowButtonStyle(isFocused: isFocused))
+        // A plain button takes key focus only with Full Keyboard Access on,
+        // and the dropdown's arrow keys have to land here without it.
+        .focusable()
+        .focusEffectDisabled()
+        .onKeyPress(.space) {
+          showing.toggle()
+          return .handled
+        }
         .popover(isPresented: $showing, arrowEdge: .trailing) {
           AudioControls(audio: audio) {
             showing = false
             onOpenSettings()
-          }.padding(16).frame(width: 330)
+          }
         }
       }
     }
-    .frame(height: 40)
+    .frame(height: DropdownLayout.audioRowHeight)
     .accessibilityLabel("Sound: \(audio.summary)")
     .accessibilityHint("Choose an output device and adjust its volume.")
     .help(audio.error ?? audio.summary)
@@ -35,19 +45,13 @@ struct AudioMenuRow: View {
   }
 
   private var label: some View {
-    HStack(spacing: 10) {
-      Image(systemName: audio.isMuted == true ? "speaker.slash.fill" : "speaker.wave.2.fill")
-        .font(.system(size: 15, weight: .medium)).foregroundStyle(.secondary)
-        .frame(width: 22).accessibilityHidden(true)
-      Text("Sound").font(.system(size: 13, weight: .medium))
-      Spacer(minLength: 6)
-      if audio.isApplying && !snapshot { ProgressView().controlSize(.small) }
-      Text(audio.summary).font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)
-      Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
-        .foregroundStyle(.secondary).accessibilityHidden(true)
+    DeckValueRowLabel(
+      title: "Sound", value: audio.summary, isBusy: audio.isApplying, snapshot: snapshot
+    ) {
+      IconTile(
+        symbol: audio.isMuted == true ? "speaker.slash.fill" : "speaker.wave.2.fill",
+        tint: Category.connections.tint, isLit: false)
     }
-    .padding(.horizontal, 10).frame(maxWidth: .infinity, alignment: .leading)
-    .contentShape(Rectangle())
   }
 
   static func openSystemSoundSettings() {
@@ -59,98 +63,33 @@ struct AudioMenuRow: View {
   }
 }
 
+/// Output device and volume. The popover shows them stacked; the settings
+/// pane shows each in its own section.
 @MainActor
-private struct AudioControls: View {
+struct AudioControls: View {
   @ObservedObject var audio: AudioController
-  var showTitle = true
+  var inPane = false
   var onOpenSettings: (() -> Void)?
   @ViewState<Double> private var draftVolume = 0
   @ViewState<Bool> private var editingVolume = false
   @ViewState<String?> private var editingUID = nil
   @ViewState<Task<Void, Never>?> private var pendingCommit = nil
 
+  static let popoverWidth: CGFloat = 300
+  private let paneInset = DeckStyle.cardInset
+
   private var busy: Bool { audio.isLoading || audio.isApplying }
+  private var outputsLocked: Bool {
+    busy || !audio.available || !audio.snapshot.canSelectOutput
+  }
   private var volumePercent: String {
     guard audio.volume != nil else { return "Device volume" }
     return "\(Int((draftVolume * 100).rounded()))%"
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 14) {
-      if showTitle {
-        HStack {
-          Text("Sound").font(.system(size: 15, weight: .semibold))
-          Spacer()
-          refreshButton
-        }
-      }
-
-      if audio.outputs.isEmpty {
-        Text(audio.isLoading ? "Reading output devices…" : "No output devices connected.")
-          .font(.system(size: 12)).foregroundStyle(.secondary)
-      } else {
-        Picker("Output", selection: outputBinding) {
-          if audio.snapshot.selectedUID == nil { Text("Choose an output").tag("") }
-          ForEach(audio.outputs) { output in
-            Text(output.name).tag(output.uid)
-          }
-        }
-        .pickerStyle(.menu)
-        .disabled(busy || !audio.available || !audio.snapshot.canSelectOutput)
-        .accessibilityLabel("Sound output device")
-      }
-
-      VStack(spacing: 6) {
-        HStack {
-          Text("Volume").font(.system(size: 12, weight: .medium))
-          if audio.isMuted == true {
-            Text("Muted").font(.system(size: 11)).foregroundStyle(.secondary)
-          }
-          Spacer()
-          Text(volumePercent).font(.system(size: 11.5)).monospacedDigit().foregroundStyle(
-            .secondary)
-        }
-        HStack(spacing: 9) {
-          Image(systemName: "speaker.fill").foregroundStyle(.secondary).accessibilityHidden(true)
-          Slider(
-            value: volumeBinding, in: 0...1, step: 0.01, onEditingChanged: volumeEditingChanged
-          )
-          .disabled(busy || !audio.canSetVolume)
-          .accessibilityLabel("Output volume")
-          .accessibilityValue(volumePercent)
-          Image(systemName: "speaker.wave.3.fill").foregroundStyle(.secondary)
-            .accessibilityHidden(true)
-        }
-        if !audio.isLoading && audio.available && !audio.canSetVolume {
-          Text("Adjust volume on this device.").font(.system(size: 11)).foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        } else if audio.isMuted == true {
-          Text("Changing volume keeps mute on.").font(.system(size: 11)).foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-      }
-
-      if let error = audio.error {
-        VStack(alignment: .leading, spacing: 8) {
-          Label(error, systemImage: "exclamationmark.circle.fill")
-            .font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
-          HStack {
-            Button("Refresh") { Task { await audio.refresh() } }
-              .disabled(audio.isRefreshing || audio.isApplying)
-            Button("System Sound Settings…") { AudioMenuRow.openSystemSoundSettings() }
-          }.font(.system(size: 11.5))
-        }
-      }
-
-      if let onOpenSettings {
-        Divider()
-        Button("Sound Settings…", action: onOpenSettings).font(.system(size: 12))
-      } else if !showTitle {
-        HStack {
-          Spacer()
-          refreshButton
-        }
-      }
+    Group {
+      if inPane { paneBody } else { popoverBody }
     }
     .onAppear { draftVolume = audio.volume ?? 0 }
     .onChange(of: audio.volume) { _, value in
@@ -165,31 +104,144 @@ private struct AudioControls: View {
     .onDisappear { pendingCommit?.cancel() }
   }
 
-  private var refreshButton: some View {
-    Button {
-      Task { await audio.refresh() }
-    } label: {
-      if audio.isRefreshing || audio.isLoading {
-        ProgressView().controlSize(.small)
-      } else {
-        Image(systemName: "arrow.clockwise")
+  private var popoverBody: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      HStack {
+        Text("Sound").font(DeckStyle.cardTitle).accessibilityAddTraits(.isHeader)
+        Spacer()
+        AudioRefreshButton(audio: audio)
+      }
+
+      VStack(alignment: .leading, spacing: 4) {
+        DeckSectionLabel(title: "Output")
+        outputList(rowHeight: 26, highlightInset: 0)
+          .padding(.horizontal, -DeckActionButtonStyle.textInset)
+      }
+
+      DeckSeparator(leadingInset: 0)
+
+      volumeControls(showTitle: true)
+
+      if let error = audio.error {
+        DeckSeparator(leadingInset: 0)
+        errorNotice(error)
+      }
+
+      if let onOpenSettings {
+        DeckSeparator(leadingInset: 0)
+        Button("Sound Settings…", action: onOpenSettings)
+          .buttonStyle(DeckActionButtonStyle())
+          .padding(.horizontal, -DeckActionButtonStyle.textInset)
       }
     }
-    .buttonStyle(.borderless).disabled(audio.isRefreshing || audio.isApplying)
-    .help("Refresh sound devices and volume").accessibilityLabel("Refresh sound")
+    .padding(14)
+    .frame(width: Self.popoverWidth)
   }
 
-  private var outputBinding: Binding<String> {
-    Binding(
-      get: { audio.snapshot.selectedUID ?? "" },
-      set: { uid in Task { await audio.selectOutput(uid) } })
+  private var paneBody: some View {
+    VStack(alignment: .leading, spacing: DeckStyle.paneSpacing) {
+      PaneSection(title: "Output Device") {
+        outputList(rowHeight: 36, highlightInset: 3)
+          .padding(.horizontal, paneInset - DeckActionButtonStyle.textInset - 3)
+          .padding(.vertical, 4)
+      }
+      PaneSection(title: "Volume") {
+        volumeControls(showTitle: false).padding(paneInset)
+      }
+      if let error = audio.error {
+        errorNotice(error).padding(paneInset).deckCard()
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func outputList(rowHeight: CGFloat, highlightInset: CGFloat) -> some View {
+    if audio.outputs.isEmpty {
+      Text(audio.isLoading ? "Reading output devices…" : "No output devices connected.")
+        .font(DeckStyle.value).foregroundStyle(.secondary)
+        .padding(.horizontal, DeckActionButtonStyle.textInset + highlightInset)
+        .frame(maxWidth: .infinity, minHeight: rowHeight, alignment: .leading)
+    } else {
+      VStack(alignment: .leading, spacing: 0) {
+        ForEach(audio.outputs) { output in
+          let selected = output.uid == audio.snapshot.selectedUID
+          Button {
+            guard !selected else { return }
+            Task { await audio.selectOutput(output.uid) }
+          } label: {
+            HStack(spacing: 8) {
+              Text(output.name)
+              Spacer(minLength: 8)
+              Image(systemName: "checkmark").font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+                .opacity(selected ? 1 : 0).accessibilityHidden(true)
+            }
+          }
+          .buttonStyle(DeckActionButtonStyle(minHeight: rowHeight, highlightInset: highlightInset))
+          .accessibilityAddTraits(selected ? .isSelected : [])
+        }
+      }
+      .disabled(outputsLocked)
+      .accessibilityElement(children: .contain)
+      .accessibilityLabel("Sound output device")
+    }
+  }
+
+  private func volumeControls(showTitle: Bool) -> some View {
+    VStack(alignment: .leading, spacing: 6) {
+      if showTitle || audio.isMuted == true {
+        HStack(spacing: 6) {
+          if showTitle { DeckSectionLabel(title: "Volume") }
+          if audio.isMuted == true {
+            Text("Muted").font(DeckStyle.caption).foregroundStyle(.secondary)
+          }
+          Spacer()
+          if showTitle { percentLabel }
+        }
+      }
+      HStack(spacing: 8) {
+        Image(systemName: "speaker.fill").font(DeckStyle.value).foregroundStyle(.secondary)
+          .frame(width: 14).accessibilityHidden(true)
+        // No `step:`: on macOS it draws one tick mark per step. The binding
+        // rounds instead, so the committed precision stays at 1%.
+        Slider(value: volumeBinding, in: 0...1, onEditingChanged: volumeEditingChanged)
+          .disabled(busy || !audio.canSetVolume)
+          .accessibilityLabel("Output volume")
+          .accessibilityValue(volumePercent)
+        Image(systemName: "speaker.wave.3.fill").font(DeckStyle.value).foregroundStyle(.secondary)
+          .frame(width: 20).accessibilityHidden(true)
+        if !showTitle {
+          percentLabel.frame(minWidth: 40, alignment: .trailing)
+        }
+      }
+      if !audio.isLoading && audio.available && !audio.canSetVolume {
+        Text("Adjust volume on this device.").font(DeckStyle.caption).foregroundStyle(.secondary)
+          .frame(maxWidth: .infinity, alignment: .leading)
+      } else if audio.isMuted == true {
+        Text("Changing volume keeps mute on.").font(DeckStyle.caption).foregroundStyle(.secondary)
+          .frame(maxWidth: .infinity, alignment: .leading)
+      }
+    }
+  }
+
+  private var percentLabel: some View {
+    Text(volumePercent).font(DeckStyle.value).monospacedDigit().foregroundStyle(.secondary)
+      .lineLimit(1)
+  }
+
+  private func errorNotice(_ error: String) -> some View {
+    DeckNotice(message: error) {
+      Button("Refresh") { Task { await audio.refresh() } }
+        .disabled(audio.isRefreshing || audio.isApplying)
+      Button("System Sound Settings…") { AudioMenuRow.openSystemSoundSettings() }
+    }
   }
 
   private var volumeBinding: Binding<Double> {
     Binding(
       get: { draftVolume },
       set: { value in
-        draftVolume = value
+        draftVolume = (value * 100).rounded() / 100
         // Native Slider sends editing boundaries for drags. Debounce keyboard/accessibility changes.
         if !editingVolume { commitVolume(after: .milliseconds(150)) }
       })
@@ -216,7 +268,28 @@ private struct AudioControls: View {
       if delay != .zero { try? await Task.sleep(for: delay) }
       guard !Task.isCancelled, !editingVolume, audio.snapshot.selectedUID == uid else { return }
       await audio.setVolume(value)
+      // A rejected or snapped-back write leaves audio.volume unchanged, so
+      // onChange never fires; resync here unless the user is dragging again.
+      if !editingVolume { draftVolume = audio.volume ?? 0 }
     }
+  }
+}
+
+private struct AudioRefreshButton: View {
+  @ObservedObject var audio: AudioController
+
+  var body: some View {
+    Button {
+      Task { await audio.refresh() }
+    } label: {
+      if audio.isRefreshing || audio.isLoading {
+        ProgressView().controlSize(.small)
+      } else {
+        Image(systemName: "arrow.clockwise")
+      }
+    }
+    .buttonStyle(.borderless).disabled(audio.isRefreshing || audio.isApplying)
+    .help("Refresh sound devices and volume").accessibilityLabel("Refresh sound")
   }
 }
 
@@ -225,17 +298,18 @@ struct AudioPane: View {
   @ObservedObject var audio: AudioController
 
   var body: some View {
-    Form {
-      Section("Output Device & Volume") {
-        AudioControls(audio: audio, showTitle: false)
+    PaneScaffold {
+      PaneHeader(title: "Sound", subtitle: "The output this Mac plays through, and its volume.") {
+        AudioRefreshButton(audio: audio)
       }
-      Section {
+      AudioControls(audio: audio, inPane: true)
+      VStack(alignment: .leading, spacing: 8) {
         Button("Open System Sound Settings…") { AudioMenuRow.openSystemSoundSettings() }
         Text("Choose a connected output and set its volume. Mute is controlled by Mute Sound.")
-          .font(.system(size: 11)).foregroundStyle(.secondary)
+          .font(DeckStyle.caption).foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
       }
     }
-    .formStyle(.grouped)
     .task { await audio.refresh(clearError: false) }
   }
 }

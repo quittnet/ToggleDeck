@@ -71,6 +71,9 @@ struct CursorLayoutTests {
     for showDescriptions in [false, true] {
       let metrics = DropdownLayout.Metrics(showDescriptions: showDescriptions)
       #expect(DropdownLayout.height([cursor], metrics: metrics) == 40)
+      #expect(
+        DropdownLayout.height([cursor], metrics: metrics, cursorAttention: true)
+          == DropdownLayout.cursorAttentionRowHeight)
       #expect(DropdownLayout.height([audio], metrics: metrics) == 40)
       let result = DropdownLayout.pack(
         [cursor], showDescriptions: showDescriptions,

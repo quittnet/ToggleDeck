@@ -1,5 +1,6 @@
 import SwiftUI
 
+/// Pointer size and shake to locate, laid out as the rows of a settings card.
 @MainActor
 struct PointerControlsView: View {
   @ObservedObject var pointer: PointerController
@@ -7,74 +8,89 @@ struct PointerControlsView: View {
   @ViewState<Bool> private var isDragging = false
   @ViewState<Task<Void, Never>?> private var pendingChange = nil
 
+  private let inset = DeckStyle.cardInset
+
   private var canEdit: Bool { pointer.available && !pointer.isLoading && !pointer.isApplying }
   private var draftLabel: String { "\(Int((draftScale * 100).rounded()))%" }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
+    VStack(alignment: .leading, spacing: 0) {
+      VStack(alignment: .leading, spacing: 10) {
+        HStack {
+          Text("Pointer size").font(DeckStyle.rowTitle)
+          Spacer()
+          if pointer.isLoading {
+            Text("Reading…").font(DeckStyle.value).foregroundStyle(.secondary)
+          } else if !pointer.available {
+            Text("Unavailable").font(DeckStyle.value).foregroundStyle(.secondary)
+          } else if pointer.isApplying {
+            DeckSpinner()
+          } else {
+            Text(draftLabel).font(DeckStyle.value).monospacedDigit().foregroundStyle(.secondary)
+              .accessibilityLabel("Pointer size: \(draftLabel)")
+          }
+        }
+        .frame(minHeight: 18)
+        // No `step:`: on macOS it draws one tick mark per step. The setter
+        // rounds instead, so the committed precision stays at 5%.
+        Slider(
+          value: Binding(
+            get: { draftScale },
+            set: { value in
+              let rounded = (value * 20).rounded() / 20
+              draftScale = rounded
+              if !isDragging { scheduleKeyboardScale(rounded) }
+            }),
+          in: PointerSettings.supportedScale
+        ) { editing in
+          isDragging = editing
+          cancelPendingChange()
+          if !editing { requestScale(draftScale) }
+        }
+        .disabled(!canEdit).accessibilityLabel("Pointer size")
+        .accessibilityValue(draftLabel)
+        .help("Adjust your Mac’s pointer size. Changes apply when you finish dragging.")
+        PointerSizeChips(current: pointer.available ? draftScale : nil) { requestScale($0) }
+          .disabled(!canEdit)
+      }
+      .padding(inset)
+
+      DeckSeparator(leadingInset: inset)
+
       HStack {
-        Text("Pointer size").font(.system(size: 13, weight: .medium))
-        Spacer()
-        if pointer.isLoading {
-          Text("Reading…").font(.system(size: 12)).foregroundStyle(.secondary)
-        } else if !pointer.available {
-          Text("Unavailable").font(.system(size: 12)).foregroundStyle(.secondary)
-        } else if pointer.isApplying {
-          ProgressView().controlSize(.small)
-        } else {
-          Menu(draftLabel) {
-            ForEach([1.0, 1.25, 1.5, 2, 3, 4], id: \.self) { scale in
-              Button("\(Int(scale * 100))%") { requestScale(scale) }
-            }
-          }.menuStyle(.borderlessButton).fixedSize().disabled(!canEdit)
-            .accessibilityLabel("Pointer size: \(draftLabel)")
-        }
+        Text("Shake pointer to locate").font(DeckStyle.rowTitle).accessibilityHidden(true)
+        Spacer(minLength: 8)
+        Toggle(
+          "Shake pointer to locate",
+          isOn: Binding(
+            get: { pointer.settings.shakeToFind },
+            set: { enabled in
+              cancelPendingChange()
+              let scale = draftScale
+              Task { @MainActor in
+                await pointer.apply(PointerSettings(scale: scale, shakeToFind: enabled))
+                draftScale = pointer.settings.scale
+              }
+            })
+        )
+        .settingsSwitch().disabled(!canEdit)
       }
-      Slider(
-        value: Binding(
-          get: { draftScale },
-          set: { value in
-            draftScale = value
-            if !isDragging { scheduleKeyboardScale(value) }
-          }),
-        in: PointerSettings.supportedScale, step: 0.05
-      ) { editing in
-        isDragging = editing
-        cancelPendingChange()
-        if !editing { requestScale(draftScale) }
-      }
-      .disabled(!canEdit).accessibilityLabel("Pointer size")
-      .accessibilityValue(draftLabel)
-      .help("Adjust your Mac’s pointer size. Changes apply when you finish dragging.")
-      Toggle(
-        "Shake pointer to locate",
-        isOn: Binding(
-          get: { pointer.settings.shakeToFind },
-          set: { enabled in
-            cancelPendingChange()
-            let scale = draftScale
-            Task { @MainActor in
-              await pointer.apply(PointerSettings(scale: scale, shakeToFind: enabled))
-              draftScale = pointer.settings.scale
-            }
-          })
-      )
-      .toggleStyle(.switch).font(.system(size: 13)).disabled(!canEdit)
+      .padding(.horizontal, inset)
+      .frame(minHeight: 40)
       .help("Quickly move your mouse or finger on the trackpad to enlarge the pointer briefly.")
+
       if let error = pointer.error {
-        VStack(alignment: .leading, spacing: 7) {
-          Label(error, systemImage: "exclamationmark.circle.fill")
-            .font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
-          HStack(spacing: 12) {
-            Button("Refresh") { Task { await pointer.refresh() } }
-              .disabled(pointer.isRefreshing || pointer.isApplying)
-            Button("Full Disk Access…") { CursorColorMenu.openFullDiskAccess() }
-            Button("Pointer Settings…") { CursorColorMenu.openPointerSettings() }
-          }.font(.system(size: 12))
+        DeckSeparator(leadingInset: inset)
+        DeckNotice(message: error) {
+          Button("Refresh") { Task { await pointer.refresh() } }
+            .disabled(pointer.isRefreshing || pointer.isApplying)
+          Button("Full Disk Access…") { CursorColorMenu.openFullDiskAccess() }
+          Button("Pointer Settings…") { CursorColorMenu.openPointerSettings() }
         }
+        .padding(inset)
       }
     }
-    .frame(maxWidth: 330)
+    .frame(maxWidth: .infinity, alignment: .leading)
     .onAppear { draftScale = pointer.settings.scale }
     .onChange(of: pointer.settings) { old, new in
       if !isDragging, !old.matches(new) {
@@ -115,5 +131,57 @@ struct PointerControlsView: View {
   private func applyScale(_ scale: Double) async {
     await pointer.apply(PointerSettings(scale: scale, shakeToFind: pointer.settings.shakeToFind))
     draftScale = pointer.settings.scale
+  }
+}
+
+/// The common pointer sizes as a row of chips, the current one filled.
+struct PointerSizeChips: View {
+  static let presets: [Double] = [1, 1.25, 1.5, 2, 3, 4]
+  /// Nil marks none, for when the size is unknown.
+  let current: Double?
+  var choose: (Double) -> Void
+
+  var body: some View {
+    HStack(spacing: 6) {
+      ForEach(Self.presets, id: \.self) { scale in
+        let selected = current.map { abs($0 - scale) < 0.001 } ?? false
+        Button("\(Int(scale * 100))%") { choose(scale) }
+          .buttonStyle(ChoiceChipButtonStyle(isSelected: selected))
+          .accessibilityAddTraits(selected ? .isSelected : [])
+      }
+    }
+    .accessibilityElement(children: .contain)
+    .accessibilityLabel("Pointer size presets")
+  }
+}
+
+private struct ChoiceChipButtonStyle: ButtonStyle {
+  let isSelected: Bool
+  @ViewState<Bool> private var hovered = false
+  @Environment(\.isEnabled) private var enabled
+
+  func makeBody(configuration: Configuration) -> some View {
+    let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
+    // The resting fill is already as strong as a row's hover, so hover and
+    // press step up from it.
+    let fill: Color =
+      if isSelected {
+        .accentColor
+      } else if enabled && configuration.isPressed {
+        Color.primary.opacity(0.18)
+      } else if enabled && hovered {
+        DeckStyle.pressedFill
+      } else {
+        DeckStyle.quietFill
+      }
+    configuration.label
+      .font(DeckStyle.value.weight(isSelected ? .semibold : .regular)).monospacedDigit()
+      .foregroundStyle(isSelected ? Color.white : Color.primary)
+      .lineLimit(1)
+      .frame(maxWidth: .infinity, minHeight: 24)
+      .background(fill, in: shape)
+      .contentShape(shape)
+      .opacity(enabled ? 1 : 0.5)
+      .onHover { hovered = $0 }
   }
 }

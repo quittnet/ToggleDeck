@@ -1,4 +1,4 @@
-# ToggleDeck 2.7.0
+# ToggleDeck 2.9.0
 
 A menu bar app with 23 everyday Mac switches, cursor controls, and a Sound dropdown. All switches are pinned by default; Customize lets you remove and reorder them. Search also finds cursor, pointer, fill, outline, color presets, pointer size, audio outputs, and saved combination names.
 
@@ -56,6 +56,24 @@ Square Window Corners appears in Display. On writes the global `NSConvolutionOve
 
 A saved default menu adds this control on upgrade. Custom menu order and intentional omissions are preserved; search or Customize can find and pin it. The command line supports `--get squareWindowCorners` and `--set squareWindowCorners 1` or `0`.
 
+## New in 2.8
+
+- `--toggle <id>` flips a control and verifies the result, so a Shortcut or hotkey needs one command. `--status` prints every control as on, off, or unavailable. `--status --json` prints the same as a JSON array with `id`, `title`, `category`, `available`, and `on`. Keep Awake is reported as unavailable because it belongs to the running menu bar app. `--version` prints the installed version, which also appears at the bottom of the Settings sidebar.
+- Low Power Mode shows the setting in use for the current power source. Earlier versions showed the battery setting even on the power adapter. Turning the switch on or off still applies to both battery and power adapter.
+- Launch at login adds or removes the login item file only. It takes effect at the next login and no longer stops or duplicates the running app.
+- A control removed from the menu stays removed after restarting. The default-menu upgrade runs once per version.
+- Refresh pressed during an automatic refresh is queued instead of ignored. The menu opens on your controls with search and filter cleared. Customize opens Your Menu. Arrow keys move between the search field and the controls, and a control keeps keyboard focus after Space.
+- Show Icons on Desktop works on accounts that have never changed it. Mute Sound is unavailable on outputs without a mute control. Dark Mode waits for the first Automation prompt, and Bluetooth waits for the radio to settle before reporting a failure.
+- `--set` and `--toggle` follow the "Restart affected apps automatically" preference. An extra or unknown argument after any command prints the usage text and exits 2. `--selftest` exits 1 when its report cannot be written.
+
+## New in 2.9
+
+- The menu is redesigned. Each category is a card. Each control has an icon tile in its category color that lights up while the control is on, and its switch uses the same color. The title row and close button are gone: the search field, Refresh, and the More menu share one row. Escape or a click outside closes the menu.
+- Cursor Color opens a picker instead of a menu: a swatch for every preset and saved combination, pointer size presets, Shake to Find Pointer, and the same actions as before. Choosing a swatch applies it and leaves the picker open.
+- Sound lists the output devices as rows with a checkmark on the current one, above the volume slider. The volume and pointer size sliders no longer draw a tick mark per step.
+- The Settings window uses the same cards and icon tiles. Every pane has a title, the sidebar runs to the top of the window, General is grouped into cards, Your Menu sets its order with a By Category / Custom Order control, and the Cursor pane shows every preset as a swatch.
+- Card edges, separators, and switch tracks are drawn stronger when Increase Contrast is on.
+
 ## Keep Awake
 
 Keep Awake holds native display and idle-system power assertions for the lifetime of ToggleDeck. Turning it off releases them; macOS also releases process-owned assertions when ToggleDeck exits or crashes. It does not override deliberate sleep or a closed laptop lid.
@@ -83,7 +101,7 @@ bash check_toggle_deck.sh
 
 The check script runs formatting lint, script syntax checks, regression tests using Swift Testing, and a release build with warnings treated as errors. The package uses Swift 6 concurrency checking. The test suite uses Swift Testing and works with Command Line Tools installations that do not include XCTest.
 
-Use `--preview-dropdown` for a separate window with simulated control states. `--render-dropdown /path/to/preview` exports light, dark, search, empty, detailed, loading, unavailable, error, and timed-session views without changing Mac settings.
+Use `--preview-dropdown` for a separate window with simulated control states. `--render-dropdown /path/to/preview` exports light, dark, search, empty, detailed, loading, unavailable, error, timed-session, ungrouped, and busy views without changing Mac settings. `--render /path/to/preview` captures the dropdown, each Settings pane, and the cursor and sound pickers from offscreen windows.
 
 Previews and rendering use isolated in-memory controls and do not change Mac settings. Tests cover search normalization, filters, keyboard navigation, timer expiry and replacement, refresh/write races, rollback, menu order persistence, grouped and custom menu layout, isolated preview controls, catalog and menu migration, explicit command-line values, unavailable verification, shell output and deadline handling, concurrent commands, and Keep Awake assertion ownership, rollback, and cleanup. They do not change real macOS settings.
 
@@ -93,6 +111,9 @@ Previews and rendering use isolated in-memory controls and do not change Mac set
 ~/Applications/ToggleDeck.app/Contents/MacOS/ToggleDeck --list
 ~/Applications/ToggleDeck.app/Contents/MacOS/ToggleDeck --get darkMode
 ~/Applications/ToggleDeck.app/Contents/MacOS/ToggleDeck --set darkMode 1
+~/Applications/ToggleDeck.app/Contents/MacOS/ToggleDeck --toggle darkMode
+~/Applications/ToggleDeck.app/Contents/MacOS/ToggleDeck --status --json
+~/Applications/ToggleDeck.app/Contents/MacOS/ToggleDeck --version
 ~/Applications/ToggleDeck.app/Contents/MacOS/ToggleDeck --selftest --verbose
 ```
 

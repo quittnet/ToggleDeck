@@ -18,6 +18,8 @@ final class PointerController: ObservableObject {
   private let writer: Writer
   private let isPreview: Bool
   private var revision: UInt64 = 0
+  private var queuedRefresh = false
+  private var queuedClearError = false
   private var observation: AnyCancellable?
 
   init(preview: Bool = false, reader: Reader? = nil, writer: Writer? = nil) {
@@ -45,10 +47,20 @@ final class PointerController: ObservableObject {
   }
 
   func refresh(clearError: Bool = true) async {
-    guard !isPreview, !isRefreshing, !isApplying else { return }
+    guard !isPreview else { return }
+    // A change notification during a read or write must not be lost: the
+    // in-flight read may predate it. Replay once when the operation ends.
+    if isApplying || isRefreshing {
+      queuedRefresh = true
+      queuedClearError = queuedClearError || clearError
+      return
+    }
     isRefreshing = true
     let started = revision
-    defer { isRefreshing = false }
+    defer {
+      isRefreshing = false
+      runQueuedRefresh()
+    }
     let value = await reader()
     guard started == revision, !isApplying else { return }
     isLoading = false
@@ -69,7 +81,9 @@ final class PointerController: ObservableObject {
       error = "Choose a pointer size between 100% and 400%."
       return
     }
-    guard !settings.matches(requested) else { return }
+    // No early return for an unchanged value: the shown settings can be stale,
+    // and the system writer skips the write itself when nothing differs. The
+    // read-back also corrects the stale value.
     revision += 1
     if isPreview {
       settings = requested
@@ -78,7 +92,10 @@ final class PointerController: ObservableObject {
     }
     isApplying = true
     error = nil
-    defer { isApplying = false }
+    defer {
+      isApplying = false
+      runQueuedRefresh()
+    }
     if let failure = await writer(requested) {
       // A native setter can change WindowServer before persistence fails.
       // A failed rollback must never leave the UI showing an assumed state.
@@ -102,5 +119,13 @@ final class PointerController: ObservableObject {
       return
     }
     error = nil
+  }
+
+  private func runQueuedRefresh() {
+    guard queuedRefresh, !isApplying, !isRefreshing else { return }
+    let clearError = queuedClearError
+    queuedRefresh = false
+    queuedClearError = false
+    Task { @MainActor [weak self] in await self?.refresh(clearError: clearError) }
   }
 }

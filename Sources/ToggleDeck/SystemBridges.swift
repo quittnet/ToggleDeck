@@ -145,19 +145,32 @@ final class Bridges: @unchecked Sendable {
 
   /// Returns nil on success, or a human-readable reason on failure.
   func setBluetooth(_ on: Bool) -> String? {
-    if let r = helper("--bt-set \(on ? 1 : 0)"), r.ok {
-      usleep(300_000)
-      if bluetoothIsOn() == on { return nil }
+    if let r = helper("--bt-set \(on ? 1 : 0)"), r.ok,
+      Self.waitForBluetooth(on, read: { self.bluetoothIsOn() })
+    {
+      return nil
     }
     if let bu = blueutilPath {
       let r = Shell.run("\(Shell.quote(bu)) -p \(on ? 1 : 0)", timeout: 6)
-      if r.ok {
-        usleep(300_000)
-        if bluetoothIsOn() == on { return nil }
-      }
+      if r.ok, Self.waitForBluetooth(on, read: { self.bluetoothIsOn() }) { return nil }
     }
     return
       "macOS blocked the Bluetooth change. Run 'brew install blueutil' for a fallback that does not depend on private APIs."
+  }
+
+  /// The radio can take a few seconds to settle after an accepted change. One
+  /// check 300ms later reported failure for a change that then landed, so poll
+  /// for about 3s (each read itself costs ~150ms). A nil read is not-yet.
+  static func waitForBluetooth(
+    _ on: Bool, attempts: Int = 8,
+    read: () -> Bool?,
+    sleep: (UInt32) -> Void = { _ = usleep($0) }
+  ) -> Bool {
+    for _ in 0..<attempts {
+      sleep(300_000)
+      if read() == on { return true }
+    }
+    return false
   }
 
   // MARK: Night Shift
@@ -307,23 +320,33 @@ final class Bridges: @unchecked Sendable {
   // MARK: Dark Mode
 
   func darkModeIsOn() -> Bool {
-    let raw =
-      CFPreferencesCopyAppValue(
-        "AppleInterfaceStyle" as CFString,
-        ".GlobalPreferences" as CFString) as? String
+    // Use the synchronized preference path so verification sees changes made
+    // by System Events instead of an earlier in-process cached appearance.
+    let raw = Prefs.read(.global("AppleInterfaceStyle")) as? String
     return raw?.caseInsensitiveCompare("Dark") == .orderedSame
   }
 
   func setDarkMode(_ on: Bool) -> String? {
     let script =
       "tell application \"System Events\" to tell appearance preferences to set dark mode to \(on)"
-    let r = Shell.run("/usr/bin/osascript -e \(Shell.quote(script))", timeout: 10)
-    if r.ok { return nil }
-    if r.out.contains("-1743") || r.out.lowercased().contains("not allowed") {
+    // The first change shows the Automation consent dialog and osascript
+    // waits for the answer, so allow time for the user to read and choose.
+    let r = Shell.run("/usr/bin/osascript -e \(Shell.quote(script))", timeout: 120)
+    return Self.darkModeError(r)
+  }
+
+  static func darkModeError(_ result: ShellResult) -> String? {
+    if result.ok { return nil }
+    if result.status == -2 {
+      return
+        "macOS did not answer in time. If an Automation prompt is open, choose Allow, then try again."
+    }
+    let diagnostics = result.out + "\n" + result.err
+    if diagnostics.contains("-1743") || diagnostics.lowercased().contains("not allowed") {
       return
         "Grant ToggleDeck permission to control System Events under Privacy & Security → Automation."
     }
-    return r.out.isEmpty ? "Appearance change failed." : r.out
+    return result.message.isEmpty ? "Appearance change failed." : result.message
   }
 
   // MARK: Keep Awake

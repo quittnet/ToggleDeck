@@ -61,7 +61,7 @@ struct SquareWindowCornersTests {
     #expect(!spec.needsAdmin)
     #expect(spec.requires.contains(.mayNeedAppRestart))
     #expect(spec.menuSubtitle(showDescriptions: false) == "May need app restart")
-    #expect(spec.menuHelp.contains("Apps may need to restart."))
+    #expect(spec.menuHelp.contains("Some apps update only after they restart."))
     #expect(SettingSearch.results(in: Catalog.all, query: "rounded corners").map(\.id) == [spec.id])
   }
 

@@ -272,6 +272,21 @@ struct AudioTests {
 
   @MainActor
   @Test
+  func rejectedVolumeWriteKeepsSystemVolumeAndReportsError() async {
+    let audio = AudioController(
+      reader: { .sample },
+      outputWriter: { _ in nil },
+      volumeWriter: { _, _ in "Device rejected volume." })
+    await audio.refresh()
+    let original = audio.volume
+    await audio.setVolume(0.8)
+    #expect(audio.volume == original)
+    #expect(audio.error == "Device rejected volume.")
+    #expect(!audio.isApplying)
+  }
+
+  @MainActor
+  @Test
   func readOnlyOutputSelectionNeverReachesWriter() async {
     var readOnly = AudioSnapshot.sample
     readOnly.canSelectOutput = false

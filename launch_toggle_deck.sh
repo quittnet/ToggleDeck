@@ -21,7 +21,13 @@ if [ "$NEEDS_BUILD" -eq 1 ]; then
     bash "$SCRIPT_DIR/install.sh" --no-login-item --no-launch
 else
     pkill -x ToggleDeck 2>/dev/null || true
-    sleep 0.3
+    # SIGTERM is asynchronous. Opening the app while the old process is still
+    # exiting makes LaunchServices reactivate the dying instance instead of
+    # starting a new one, which leaves nothing running.
+    for _ in $(seq 1 100); do
+        pgrep -x ToggleDeck >/dev/null 2>&1 || break
+        sleep 0.1
+    done
 fi
 
 open "$APP"

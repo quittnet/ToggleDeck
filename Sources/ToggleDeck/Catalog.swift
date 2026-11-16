@@ -106,8 +106,11 @@ enum Parse {
   }
 }
 
+/// Reads the settings in use, not `-g custom`: that lists the Battery Power
+/// profile before AC Power, so on AC with "Only on Battery" configured the
+/// switch showed ON while Low Power Mode was not active.
 private func pmsetRead(_ key: String) -> String {
-  "/usr/bin/pmset -g custom 2>/dev/null | /usr/bin/awk '$1==\"\(key)\"{print $2; exit}'"
+  "/usr/bin/pmset -g 2>/dev/null | /usr/bin/awk '$1==\"\(key)\"{print $2; exit}'"
 }
 private func pmsetWrite(_ key: String, _ value: Int) -> String {
   "/usr/bin/pmset -a \(key) \(value)"
@@ -162,7 +165,7 @@ enum Catalog {
 
     d(
       "squareWindowCorners", "Square Window Corners",
-      "Sets radius to 1. Off restores defaults. Apps may need to restart.",
+      "Makes window corners square. Some apps update only after they restart.",
       .display, "NSGlobalDomain", "NSConvolutionOverride1", v: .floatOverride(on: 1),
       req: [.mayNeedAppRestart], kw: ["rounded", "radius", "window", "corners", "square"]),
 
@@ -189,7 +192,10 @@ enum Catalog {
       read: "/usr/bin/osascript -e 'output muted of (get volume settings)'",
       on: "/usr/bin/osascript -e 'set volume output muted true'",
       off: "/usr/bin/osascript -e 'set volume output muted false'",
-      req: [.automation], kw: ["mute", "volume", "silence"]),
+      // Outputs without a mute control (some HDMI and DisplayPort devices)
+      // answer "missing value"; show them as unavailable rather than as an
+      // OFF switch whose every write fails verification.
+      req: [.automation], hardwareGated: true, kw: ["mute", "volume", "silence"]),
 
   ]
 

@@ -9,7 +9,7 @@ final class AppSettings: ObservableObject {
   private let store: UserDefaults?
   private let managesLoginItem: Bool
   /// Set while the observer is writing a read-back correction, so that write
-  /// does not re-enter the observer and touch launchd a second time.
+  /// does not re-enter the observer and rewrite the LaunchAgent a second time.
   private var applyingLoginItem = false
 
   /// IDs shown in the menu bar dropdown, in display order.
@@ -50,7 +50,10 @@ final class AppSettings: ObservableObject {
   init(store: UserDefaults? = UserDefaults.standard, manageLoginItem: Bool = true) {
     self.store = store
     managesLoginItem = manageLoginItem && store != nil
-    pinned = Self.migratedPins(store?.array(forKey: "pinned") as? [String])
+    // A pinned list with no version key predates versioning: treat it as oldest.
+    let savedVersion = store?.object(forKey: Self.pinnedSchemaVersionKey) as? Int ?? 0
+    pinned = Self.migratedPins(
+      store?.array(forKey: "pinned") as? [String], schemaVersion: savedVersion)
     restartServices = store?.object(forKey: "restartServices") as? Bool ?? true
     showDescriptions = store?.object(forKey: "showDescriptions") as? Bool ?? false
     groupDropdown = store?.object(forKey: "groupDropdown") as? Bool ?? true
@@ -58,21 +61,34 @@ final class AppSettings: ObservableObject {
     launchAtLogin = managesLoginItem && LoginItem.isEnabled
 
     store?.set(pinned, forKey: "pinned")
+    store?.set(Self.currentPinnedSchemaVersion, forKey: Self.pinnedSchemaVersionKey)
   }
 
-  /// Purely in-memory preferences for previews, with no launchd access.
+  /// Purely in-memory preferences for previews, with no LaunchAgent access.
   static func preview() -> AppSettings { AppSettings(store: nil, manageLoginItem: false) }
 
-  nonisolated static func migratedPins(_ saved: [String]?) -> [String] {
+  static let pinnedSchemaVersionKey = "pinnedSchemaVersion"
+
+  /// Version of the saved `pinned` list's relationship to the default menu.
+  /// When a release adds a control to `Catalog.defaultPinned`, bump this and add
+  /// an upgrade step in `migratedPins` guarded by `schemaVersion < N`. Only lists
+  /// still equal to an older default may be replaced; never match old defaults
+  /// unconditionally, or controls the user removed come back on every launch.
+  nonisolated static let currentPinnedSchemaVersion = 1
+
+  /// `schemaVersion` 0 means legacy data saved before the version key existed.
+  nonisolated static func migratedPins(_ saved: [String]?, schemaVersion: Int = 0) -> [String] {
     guard let saved else { return Catalog.defaultPinned }
-    if saved == Catalog.versionTwoDefaultPinned || saved == Catalog.version26DefaultPinned {
-      return Catalog.defaultPinned
-    }
-    if Array(saved.prefix(Catalog.previousDefaultPinned.count)) == Catalog.previousDefaultPinned {
-      let extras = saved.dropFirst(Catalog.previousDefaultPinned.count)
-      var seen = Set(Catalog.defaultPinned)
-      return Catalog.defaultPinned
-        + extras.filter { Catalog.byID[$0] != nil && seen.insert($0).inserted }
+    if schemaVersion < 1 {
+      if saved == Catalog.versionTwoDefaultPinned || saved == Catalog.version26DefaultPinned {
+        return Catalog.defaultPinned
+      }
+      if Array(saved.prefix(Catalog.previousDefaultPinned.count)) == Catalog.previousDefaultPinned {
+        let extras = saved.dropFirst(Catalog.previousDefaultPinned.count)
+        var seen = Set(Catalog.defaultPinned)
+        return Catalog.defaultPinned
+          + extras.filter { Catalog.byID[$0] != nil && seen.insert($0).inserted }
+      }
     }
     var seen = Set<String>()
     let retained = saved.filter { Catalog.byID[$0] != nil && seen.insert($0).inserted }
@@ -108,7 +124,10 @@ final class AppSettings: ObservableObject {
     groupDropdown = false
   }
 
-  func resetPinned() { pinned = Catalog.defaultPinned }
+  func resetPinned() {
+    pinned = Catalog.defaultPinned
+    groupDropdown = true
+  }
 }
 
 // MARK: - Launch at login
@@ -116,32 +135,55 @@ final class AppSettings: ObservableObject {
 /// Managed as a LaunchAgent rather than through SMAppService: the bundle is
 /// ad-hoc signed, and SMAppService rejects registrations it cannot attribute to
 /// a stable Developer ID.
+///
+/// The app never calls `launchctl`. launchd reads `~/Library/LaunchAgents` at
+/// login, so the plist's presence is the whole setting. Loading it into the
+/// current session breaks the app both ways:
+/// - `bootstrap` of a RunAtLoad job makes launchd start a second copy of the
+///   executable immediately (launchd bypasses LaunchServices), leaving two menu
+///   bar icons and a global-shortcut conflict.
+/// - `bootout` of the job unloads it, and launchd terminates its process. When
+///   the app was started at login, the running app is that job, so unticking
+///   the switch would quit it.
 enum LoginItem {
   static let label = "com.user.toggledeck"
 
-  static var plistURL: URL {
-    FileManager.default.homeDirectoryForCurrentUser
-      .appendingPathComponent("Library/LaunchAgents/\(label).plist")
+  /// Where the plist lives and which executable it launches. Injectable so
+  /// tests never touch the real LaunchAgents folder.
+  struct Location {
+    var directory: URL
+    var executablePath: String
+
+    var plistURL: URL { directory.appendingPathComponent("\(LoginItem.label).plist") }
+
+    static var live: Location {
+      Location(
+        directory: FileManager.default.homeDirectoryForCurrentUser
+          .appendingPathComponent("Library/LaunchAgents"),
+        executablePath: Bundle.main.executablePath ?? CommandLine.arguments[0])
+    }
   }
 
-  static var isEnabled: Bool {
-    FileManager.default.fileExists(atPath: plistURL.path)
+  static var plistURL: URL { Location.live.plistURL }
+
+  static var isEnabled: Bool { isEnabled(at: .live) }
+
+  static var executablePath: String { Location.live.executablePath }
+
+  static func isEnabled(at location: Location) -> Bool {
+    FileManager.default.fileExists(atPath: location.plistURL.path)
   }
 
-  static var executablePath: String {
-    Bundle.main.executablePath ?? CommandLine.arguments[0]
-  }
-
-  static func set(_ enabled: Bool) {
+  /// Enabling always rewrites the plist so a stale executable path is
+  /// corrected; disabling removes it. Neither touches the running launchd session.
+  static func set(_ enabled: Bool, at location: Location = .live) {
     let fm = FileManager.default
-    let url = plistURL
+    let url = location.plistURL
     if enabled {
-      try? fm.createDirectory(
-        at: url.deletingLastPathComponent(),
-        withIntermediateDirectories: true)
+      try? fm.createDirectory(at: location.directory, withIntermediateDirectories: true)
       let plist: [String: Any] = [
         "Label": label,
-        "ProgramArguments": [executablePath],
+        "ProgramArguments": [location.executablePath],
         "RunAtLoad": true,
         "KeepAlive": false,
       ]
@@ -150,13 +192,7 @@ enum LoginItem {
           fromPropertyList: plist, format: .xml, options: 0)
       else { return }
       try? data.write(to: url)
-      Shell.run(
-        "/bin/launchctl bootstrap gui/$(id -u) \(Shell.quote(url.path)) 2>/dev/null || /bin/launchctl load \(Shell.quote(url.path)) 2>/dev/null || true"
-      )
     } else {
-      Shell.run(
-        "/bin/launchctl bootout gui/$(id -u)/\(label) 2>/dev/null || /bin/launchctl unload \(Shell.quote(url.path)) 2>/dev/null || true"
-      )
       try? fm.removeItem(at: url)
     }
   }

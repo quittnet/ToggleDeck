@@ -95,14 +95,18 @@ struct PointerTests {
 
   @MainActor
   @Test
-  func sameSettingsAvoidAnUnnecessaryWrite() async {
+  func staleShownSettingsStillReachWriterAndAreCorrected() async {
+    // The system writer skips the write when nothing differs, so the controller
+    // must not decide that from a value that may be stale.
     let backend = PointerBackend()
     let pointer = controller(backend)
     await pointer.refresh()
+    await backend.setValue(PointerSettings(scale: 2, shakeToFind: true))
     await pointer.apply(.standard)
-    await pointer.apply(PointerSettings(scale: 1.00004, shakeToFind: true))
+    #expect(pointer.settings == .standard)
+    #expect(pointer.error == nil && !pointer.isApplying)
     let counts = await backend.counts()
-    #expect(counts.writes == 0 && counts.reads == 1)
+    #expect(counts.writes == 1 && counts.reads == 2)
   }
 
   @MainActor
@@ -288,6 +292,35 @@ struct PointerTests {
     await applying.value
     #expect(pointer.settings == PointerSettings(scale: 2, shakeToFind: false))
     #expect(!pointer.isApplying && pointer.error == nil)
+    // The refresh requested during the write replays once afterwards.
+    for _ in 0..<200 {
+      let reads = await backend.counts().reads
+      if reads >= 3 { break }
+      try? await Task.sleep(for: .milliseconds(2))
+    }
+    let after = await backend.counts()
+    #expect(after.reads == 3 && after.writes == 1)
+  }
+
+  @MainActor
+  @Test
+  func refreshRequestedDuringReadRunsAgainAfterItFinishes() async {
+    let backend = PointerBackend(value: PointerSettings(scale: 1.5, shakeToFind: true))
+    let pointer = controller(backend)
+    await backend.pauseNextRead()
+    let first = Task { await pointer.refresh() }
+    await backend.waitUntilReadPaused()
+    await pointer.refresh(clearError: false)
+    await backend.setValue(PointerSettings(scale: 3, shakeToFind: true))
+    await backend.releaseRead()
+    await first.value
+    for _ in 0..<200 where pointer.settings.scale != 3 {
+      try? await Task.sleep(for: .milliseconds(2))
+    }
+    #expect(pointer.settings == PointerSettings(scale: 3, shakeToFind: true))
+    #expect(!pointer.isRefreshing && !pointer.isApplying)
+    let counts = await backend.counts()
+    #expect(counts.reads == 2)
   }
 
   @MainActor
@@ -305,9 +338,15 @@ struct PointerTests {
     await backend.releaseRead()
     await reading.value
     #expect(pointer.settings == PointerSettings(scale: 3, shakeToFind: false))
-    #expect(!pointer.isRefreshing && !pointer.isApplying && pointer.error == nil)
+    // The second refresh was queued and replays after the stale read ends.
+    for _ in 0..<200 {
+      let reads = await backend.counts().reads
+      if reads >= 4 { break }
+      try? await Task.sleep(for: .milliseconds(2))
+    }
     let counts = await backend.counts()
-    #expect(counts.reads == 3 && counts.writes == 1)
+    #expect(counts.reads == 4 && counts.writes == 1)
+    #expect(!pointer.isRefreshing && !pointer.isApplying && pointer.error == nil)
   }
 
   @MainActor

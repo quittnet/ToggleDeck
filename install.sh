@@ -62,9 +62,9 @@ cat > "$STAGED_APP/Contents/Info.plist" << 'EOF'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.7.0</string>
+    <string>2.9.0</string>
     <key>CFBundleVersion</key>
-    <string>15</string>
+    <string>18</string>
     <key>CFBundleIconFile</key>
     <string>ToggleDeckIcon-v21</string>
     <key>LSMinimumSystemVersion</key>
@@ -92,7 +92,12 @@ plutil -lint "$STAGED_APP/Contents/Info.plist"
 BACKUP_DIR="$SCRIPT_DIR/.backups/install-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$BACKUP_DIR"
 pkill -x ToggleDeck 2>/dev/null || true
-sleep 0.4
+# SIGTERM is asynchronous. Wait for the old process to exit so the bundle is
+# not replaced under a running app and the later launch starts the new build.
+for _ in $(seq 1 100); do
+    pgrep -x ToggleDeck >/dev/null 2>&1 || break
+    sleep 0.1
+done
 if [ -d "$APP" ]; then mv "$APP" "$BACKUP_DIR/ToggleDeck.app"; fi
 if ! mv "$STAGED_APP" "$APP"; then
     if [ -d "$BACKUP_DIR/ToggleDeck.app" ]; then mv "$BACKUP_DIR/ToggleDeck.app" "$APP"; fi

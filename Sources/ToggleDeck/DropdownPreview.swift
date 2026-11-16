@@ -38,7 +38,10 @@ enum DropdownPreview {
       ("error", ColorScheme.light, "wifi", false),
       ("awake", ColorScheme.dark, "", false),
       ("cursor", ColorScheme.light, "cursor", false),
+      ("flat", ColorScheme.dark, "", false),
+      ("busy", ColorScheme.light, "bluetooth", false),
     ] {
+      settings.groupDropdown = name != "flat"
       var overrides: [String: ToggleState] = [:]
       if name == "loading" {
         overrides = Dictionary(uniqueKeysWithValues: Catalog.all.map { ($0.id, ToggleState()) })
@@ -50,6 +53,9 @@ enum DropdownPreview {
         overrides["wifi"] = ToggleState(
           isOn: true, error: "macOS could not apply the change. Refresh or check System Settings.",
           stale: false)
+      }
+      if name == "busy" {
+        overrides["bluetooth"] = ToggleState(isOn: true, busy: true, stale: false)
       }
       if name == "awake" { overrides["keepAwake"] = ToggleState(isOn: true, stale: false) }
       let engine = ToggleEngine.preview(
@@ -153,11 +159,7 @@ enum DropdownPreview {
         settingsWindow.makeKeyAndOrderFront(nil)
         return
       }
-      let settingsWindow = NSWindow(
-        contentRect: NSRect(x: 0, y: 0, width: 960, height: 660),
-        styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
-      settingsWindow.title = "ToggleDeck Customize Preview"
-      settingsWindow.isReleasedWhenClosed = false
+      let settingsWindow = SettingsWindow.make(title: "ToggleDeck Customize Preview")
       settingsWindow.contentView = NSHostingView(
         rootView: SettingsView(
           initialSection: section, engine: engine, settings: settings, cursor: cursor,

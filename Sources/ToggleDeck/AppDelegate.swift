@@ -11,6 +11,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
   /// Dismisses the popover on a click anywhere outside it.
   private var globalMonitor: Any?
   private var stateObservation: AnyCancellable?
+  private let settingsRouter = SettingsRouter()
+  private let dropdownSession = DropdownSession()
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     NSApp.setActivationPolicy(.accessory)
@@ -34,10 +36,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
       rootView: DropdownView(
         onOpenSettings: { [weak self] in self?.openSettings() },
         onQuit: { NSApp.terminate(nil) },
-        onOpenCursorSettings: { [weak self] in self?.showSettings(initialSection: .cursor) },
-        onOpenSoundSettings: { [weak self] in self?.showSettings(initialSection: .sound) },
+        onOpenCursorSettings: { [weak self] in self?.showSettings(section: .cursor) },
+        onOpenSoundSettings: { [weak self] in self?.showSettings(section: .sound) },
         onClose: { [weak self] in self?.popover.performClose(nil) },
-        onSizeChange: { [weak self] in self?.resizePopover(to: $0) }
+        onSizeChange: { [weak self] in self?.resizePopover(to: $0) },
+        session: dropdownSession
       )
     )
     // Without .preferredContentSize the controller keeps the default
@@ -52,12 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
       .map { $0["keepAwake"]?.isOn == true }.removeDuplicates()
       .sink { [weak self] awake in
         guard let button = self?.statusItem.button else { return }
-        button.image =
-          awake
-          ? NSImage(
-            systemSymbolName: "cup.and.saucer.fill",
-            accessibilityDescription: "ToggleDeck: Keep Awake active")
-          : SwitchGlyph.statusItemImage()
+        button.image = SwitchGlyph.statusItemImage(keepAwake: awake)
         button.image?.isTemplate = true
         button.toolTip = awake ? "ToggleDeck · Keep Awake active" : "ToggleDeck · Mac controls"
       }
@@ -191,6 +189,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
       Task { await ToggleEngine.shared.refreshAll() }
       Task { await PointerController.shared.refresh(clearError: false) }
       Task { await AudioController.shared.refresh(clearError: false) }
+      dropdownSession.willOpen()
       adoptCurrentScreen()
       preparePopoverSize()
       popover.show(relativeTo: button.bounds, of: button, preferredEdge: Self.statusItemEdge)
@@ -258,14 +257,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
       await CursorColorController.shared.refresh()
       await PointerController.shared.refresh()
       await AudioController.shared.refresh()
-      await ToggleEngine.shared.refreshAll()
+      await ToggleEngine.shared.refreshAll(clearError: true)
     }
   }
 
   // MARK: Settings window
 
   @objc func openSettings() {
-    showSettings()
+    showSettings(section: .dropdown)
   }
 
   func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool
@@ -274,28 +273,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     return true
   }
 
-  private func showSettings(initialSection: SettingsSection? = nil) {
+  /// Every entry point names its pane. Re-showing the window as it was left
+  /// opened Customize on whatever pane was last open, such as Cursor.
+  private func showSettings(section: SettingsSection) {
     popover.performClose(nil)
+    settingsRouter.request(section)
 
     if let window = settingsWindow {
-      if let initialSection {
-        window.contentViewController = NSHostingController(
-          rootView: SettingsView(initialSection: initialSection))
-      }
       NSApp.activate(ignoringOtherApps: true)
       window.makeKeyAndOrderFront(nil)
       return
     }
 
-    let window = NSWindow(
-      contentRect: NSRect(x: 0, y: 0, width: 960, height: 660),
-      styleMask: [.titled, .closable, .miniaturizable, .resizable],
-      backing: .buffered, defer: false
-    )
-    window.title = "ToggleDeck Settings"
+    let window = SettingsWindow.make(title: "ToggleDeck Settings")
     window.contentViewController = NSHostingController(
-      rootView: SettingsView(initialSection: initialSection ?? .dropdown))
-    window.isReleasedWhenClosed = false
+      rootView: SettingsView(router: settingsRouter))
     window.center()
     window.setFrameAutosaveName("ToggleDeckSettings")
     settingsWindow = window

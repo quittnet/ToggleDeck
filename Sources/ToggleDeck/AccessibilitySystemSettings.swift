@@ -73,9 +73,7 @@ enum AccessibilitySystemSettings {
       }
       if attempt + 1 < verificationAttempts { usleep(50_000) }
     }
-    let message =
-      "macOS did not save and apply this setting. Refresh or open Accessibility Display settings."
-    return failure(message, restored: restore(kind, previous: previous, using: api))
+    return failure(saveError, restored: restore(kind, previous: previous, using: api))
   }
 
   static func readPointer() -> PointerSettings? {

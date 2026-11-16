@@ -87,6 +87,17 @@ struct ExperienceTests {
 
   @MainActor
   @Test
+  func testResetRestoresCategoryGrouping() {
+    let settings = AppSettings.preview()
+    settings.pinned = ["wifi"]
+    settings.groupDropdown = false
+    settings.resetPinned()
+    #expect(settings.pinned == Catalog.defaultPinned)
+    #expect(settings.groupDropdown)
+  }
+
+  @MainActor
+  @Test
   func testTinyAndShortScreensReserveFeedbackSpace() {
     let items = Catalog.all.map { DropdownLayout.Item.row($0) }
     for size in [CGSize(width: 280, height: 560), CGSize(width: 1280, height: 480)] {
@@ -183,6 +194,16 @@ struct ExperienceTests {
       !ToggleEngine.isMissingPreference(
         command: "/usr/bin/defaults read domain key",
         result: ShellResult(status: 1, out: "", err: "Operation not permitted")))
+    // Current macOS wording for an unwritten key.
+    let current = ShellResult(
+      status: 1, out: "",
+      err:
+        "Error: Could not find key 'StandardHideDesktopIcons' in domain 'com.apple.WindowManager'.")
+    #expect(
+      ToggleEngine.isMissingPreference(
+        command: "/usr/bin/defaults read com.apple.WindowManager StandardHideDesktopIcons",
+        result: current))
+    #expect(!ToggleEngine.isMissingPreference(command: "/usr/bin/pmset -g", result: current))
   }
 
   @MainActor
@@ -218,6 +239,45 @@ struct ExperienceTests {
     #expect(count == 0)
     #expect(engine.state("wifi").stale)
   }
+
+  @MainActor
+  @Test
+  func testRefreshClearsAFailureWhenTheReadMatchesTheRequest() async {
+    let backend = PausedReader()
+    let engine = ToggleEngine(
+      reader: { spec, verifying in await backend.read(spec, verifying: verifying) },
+      writer: { spec, on in await backend.write(spec, on: on) }, verificationDelay: 0)
+    await engine.refreshAll()
+    await backend.failWrites(true)
+    await engine.set("wifi", on: true)
+    #expect(engine.state("wifi").error != nil)
+    #expect(engine.banner != nil)
+    await engine.refreshAll()
+    #expect(engine.state("wifi").error != nil)
+    #expect(engine.banner != nil)
+    #expect(!engine.state("wifi").isOn)
+    await backend.setWifi(true)
+    await engine.refreshAll()
+    #expect(engine.state("wifi").isOn)
+    #expect(engine.state("wifi").error == nil)
+    #expect(engine.banner == nil)
+  }
+
+  @MainActor
+  @Test
+  func testExplicitRefreshClearsAFailureThatDidNotStick() async {
+    let backend = PausedReader()
+    let engine = ToggleEngine(
+      reader: { spec, verifying in await backend.read(spec, verifying: verifying) },
+      writer: { spec, on in await backend.write(spec, on: on) }, verificationDelay: 0)
+    await engine.refreshAll()
+    await backend.failWrites(true)
+    await engine.set("wifi", on: true)
+    await engine.refresh("wifi")
+    #expect(!engine.state("wifi").isOn)
+    #expect(engine.state("wifi").error == nil)
+    #expect(engine.banner == nil)
+  }
 }
 
 private actor PausedReader {
@@ -225,6 +285,7 @@ private actor PausedReader {
   private var pause = false
   private var failure = false
   func failWrites(_ fail: Bool) { failure = fail }
+  func setWifi(_ on: Bool) { value = on }
   private var suspended: CheckedContinuation<Void, Never>?
   private var waiting: [CheckedContinuation<Void, Never>] = []
   private(set) var writeCount = 0

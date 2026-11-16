@@ -30,10 +30,29 @@ enum SwitchGlyph {
 
   /// Menu bar version: a template image, so macOS tints it for the light or
   /// dark menu bar and for the highlighted state.
-  static func statusItemImage() -> NSImage {
-    let image = self.image(size: NSSize(width: 16, height: 15), color: .black)
+  static func statusItemImage(keepAwake: Bool = false) -> NSImage {
+    let size = NSSize(width: 16, height: 15)
+    let image = NSImage(size: size, flipped: false) { _ in
+      draw(in: NSRect(origin: .zero, size: size), color: .black)
+      if keepAwake { drawAwakeBadge(in: NSRect(origin: .zero, size: size)) }
+      return true
+    }
     image.isTemplate = true
+    image.accessibilityDescription =
+      keepAwake ? "ToggleDeck: Keep Awake active" : "ToggleDeck"
     return image
+  }
+
+  /// A cup in the corner, drawn in black so the template image stays one color.
+  private static func drawAwakeBadge(in rect: NSRect) {
+    let config = NSImage.SymbolConfiguration(pointSize: 6, weight: .bold).applying(
+      NSImage.SymbolConfiguration(paletteColors: [.black]))
+    guard
+      let cup = NSImage(systemSymbolName: "cup.and.saucer.fill", accessibilityDescription: nil)?
+        .withSymbolConfiguration(config)
+    else { return }
+    let badge = NSRect(x: rect.maxX - 7, y: rect.minY, width: 7, height: 6)
+    cup.draw(in: badge, from: .zero, operation: .sourceOver, fraction: 1)
   }
 
   static func draw(in rect: NSRect, color: NSColor) {

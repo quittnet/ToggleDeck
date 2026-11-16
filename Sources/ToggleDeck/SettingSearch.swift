@@ -56,6 +56,20 @@ enum ControlFilter: String, CaseIterable, Identifiable {
 enum DropdownNavigation {
   enum Direction { case up, down, left, right }
 
+  /// A row mid-write stays a stop. Dropping it would take focus away from
+  /// the row the user just toggled, and the next arrow would restart at the
+  /// top. A second activation is harmless: the engine ignores busy writes.
+  static func isNavigable(_ state: ToggleState) -> Bool {
+    state.supported && !state.stale
+  }
+
+  /// Up from the first stop leaves the list for the search field rather than
+  /// staying put, since nothing above it is reachable any other way.
+  static func isFirst(_ current: String?, in columns: [[String]]) -> Bool {
+    guard let current else { return false }
+    return columns.lazy.flatMap { $0 }.first == current
+  }
+
   static func target(in columns: [[String]], current: String?, direction: Direction) -> String? {
     let flat = columns.flatMap { $0 }
     guard !flat.isEmpty else { return nil }

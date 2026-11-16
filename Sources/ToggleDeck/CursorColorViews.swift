@@ -31,14 +31,35 @@ struct CursorArrowPreview: View {
   }
 }
 
+/// The arrow on a neutral tile. The fill sits between white and black in both
+/// appearances, so a black and a white pointer both stay visible on it.
+struct CursorArrowTile: View {
+  let colors: CursorColors
+  var size: CGFloat = DeckStyle.tileSize
+
+  var body: some View {
+    RoundedRectangle(cornerRadius: size * 0.27, style: .continuous)
+      .fill(DeckStyle.quietFill)
+      .frame(width: size, height: size)
+      .overlay {
+        // The arrow's mass sits left of its box; nudge it to look centered.
+        CursorArrowPreview(colors: colors)
+          .frame(width: size * 0.5, height: size * 0.66)
+          .offset(x: size * 0.03)
+      }
+      .accessibilityHidden(true)
+  }
+}
+
 @MainActor
 struct CursorColorMenu: View {
   @ObservedObject var cursor: CursorColorController
   @ObservedObject var pointer: PointerController = .shared
   var onCustom: () -> Void
-  var onChoose: (CursorColors) -> Void = { _ in }
   var snapshot = false
-  var showCustom = true
+  /// Set by the dropdown while keyboard focus is on this row.
+  var isFocused = false
+  @ViewState<Bool> private var showing = false
 
   private var error: String? { cursor.error ?? pointer.error }
 
@@ -54,126 +75,50 @@ struct CursorColorMenu: View {
       if snapshot {
         label
       } else {
-        HStack(spacing: 10) {
-          CursorArrowPreview(colors: cursor.colors).frame(width: 22, height: 26)
-          VStack(alignment: .leading, spacing: 1) {
-            Menu {
-              if !cursor.palettes.savedColors.isEmpty {
-                Section("Saved Combinations") {
-                  ForEach(cursor.palettes.savedColors) { saved in
-                    colorChoice(saved.name, colors: saved.colors)
-                  }
-                }
-              }
-              Section("Color Combinations") {
-                ForEach(CursorPreset.combinationPresets) { preset in
-                  colorChoice(preset.rawValue, colors: preset.colors)
-                }
-              }
-              Section("Colors") {
-                ForEach(CursorPreset.solidPresets) { preset in
-                  colorChoice(preset.rawValue, colors: preset.colors)
-                }
-              }
-              Divider()
-              Menu("Pointer Size") {
-                ForEach([1.0, 1.25, 1.5, 2.0, 3.0, 4.0], id: \.self) { scale in
-                  Button("\(Int(scale * 100))%") {
-                    Task {
-                      await pointer.apply(
-                        PointerSettings(
-                          scale: scale, shakeToFind: pointer.settings.shakeToFind))
-                    }
-                  }
-                }
-              }.disabled(pointer.isLoading || pointer.isApplying || !pointer.available)
-              Toggle(
-                "Shake to Find Pointer",
-                isOn: Binding(
-                  get: { pointer.settings.shakeToFind },
-                  set: { enabled in
-                    Task {
-                      await pointer.apply(
-                        PointerSettings(
-                          scale: pointer.settings.scale, shakeToFind: enabled))
-                    }
-                  })
-              )
-              .disabled(pointer.isLoading || pointer.isApplying || !pointer.available)
-              Divider()
-              Button("Save Current Combination") { cursor.palettes.save(cursor.colors) }
-                .disabled(
-                  cursor.isLoading || cursor.isApplying || !cursor.available
-                    || cursor.palettes.matching(cursor.colors) != nil)
-              Divider()
-              if showCustom { Button("Custom Colors…", action: onCustom) }
-              Button("Refresh Cursor Settings") {
-                Task {
-                  await cursor.refresh()
-                  await pointer.refresh()
-                }
-              }
-              .disabled(
-                cursor.isRefreshing || cursor.isApplying || pointer.isRefreshing
-                  || pointer.isApplying)
-              if error != nil {
-                Button("Full Disk Access…") { Self.openFullDiskAccess() }
-              }
-              Button("Open Pointer Settings…") { Self.openPointerSettings() }
-            } label: {
-              Text("Cursor Color · \(status)").font(.system(size: 13, weight: .medium))
-            }
-            .menuStyle(.borderlessButton).menuIndicator(.visible)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .disabled(cursor.isApplying)
-            .accessibilityLabel("Cursor Color: \(status)")
-            .accessibilityHint(
-              error ?? "Choose colors, adjust pointer size, or enable shake to locate.")
-            if error != nil {
-              Text("Needs attention · details in menu")
-                .font(.system(size: 10.5)).foregroundStyle(.secondary)
-            }
-          }
-        }.padding(.horizontal, 10)
+        Button {
+          showing.toggle()
+        } label: {
+          label
+        }
+        .buttonStyle(DeckRowButtonStyle(isFocused: isFocused))
+        // A plain button takes key focus only with Full Keyboard Access on,
+        // and the dropdown's arrow keys have to land here without it.
+        .focusable(!cursor.isApplying)
+        .focusEffectDisabled()
+        .onKeyPress(.space) {
+          guard !cursor.isApplying else { return .ignored }
+          showing.toggle()
+          return .handled
+        }
+        .disabled(cursor.isApplying)
+        .popover(isPresented: $showing, arrowEdge: .trailing) {
+          CursorColorPicker(
+            cursor: cursor, pointer: pointer,
+            onCustom: {
+              showing = false
+              onCustom()
+            })
+        }
       }
     }
-    .frame(height: 40)
+    .frame(
+      height: error == nil
+        ? DropdownLayout.cursorRowHeight : DropdownLayout.cursorAttentionRowHeight,
+      alignment: .center
+    )
+    .accessibilityLabel("Cursor Color: \(status)")
+    .accessibilityHint(error ?? "Choose colors, adjust pointer size, or enable shake to locate.")
     .help(error ?? "Change your Mac's pointer color, size, and shake to locate")
   }
 
-  private func colorChoice(_ name: String, colors: CursorColors) -> some View {
-    Button {
-      Task {
-        await cursor.apply(colors)
-        onChoose(cursor.colors)
-      }
-    } label: {
-      HStack {
-        Text(name)
-        if cursor.colors.matches(colors) && cursor.colors.customized == colors.customized {
-          Image(systemName: "checkmark")
-        }
-      }
-    }.disabled(cursor.isLoading || cursor.isApplying || !cursor.available)
-  }
-
   private var label: some View {
-    HStack(spacing: 10) {
-      CursorArrowPreview(colors: cursor.colors).frame(width: 22, height: 26)
-      VStack(alignment: .leading, spacing: 2) {
-        Text("Cursor Color").font(.system(size: 13, weight: .medium))
-        if error != nil {
-          Text("Needs attention · details in menu").font(.system(size: 10.5)).foregroundStyle(
-            .secondary)
-        }
-      }
-      Spacer(minLength: 6)
-      if cursor.isApplying && !snapshot { ProgressView().controlSize(.small) }
-      Text(status).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
-      Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(
-        .secondary)
-    }.padding(.horizontal, 10).frame(maxWidth: .infinity, alignment: .leading).contentShape(
-      Rectangle())
+    DeckValueRowLabel(
+      title: "Cursor Color",
+      subtitle: error == nil ? nil : "Needs attention · details inside",
+      value: status, isBusy: cursor.isApplying, snapshot: snapshot
+    ) {
+      CursorArrowTile(colors: cursor.colors)
+    }
   }
 
   static func openPointerSettings() {
@@ -186,10 +131,196 @@ struct CursorColorMenu: View {
 
   static func openFullDiskAccess() {
     if let url = URL(
-      string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")
+      string:
+        "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles")
     {
       NSWorkspace.shared.open(url)
     }
+  }
+}
+
+/// Contents of the cursor row's popover: colors, pointer size, shake to
+/// locate, and the less frequent actions.
+@MainActor
+struct CursorColorPicker: View {
+  @ObservedObject var cursor: CursorColorController
+  @ObservedObject var pointer: PointerController
+  var onCustom: () -> Void = {}
+
+  static let width: CGFloat = 320
+
+  private var error: String? { cursor.error ?? pointer.error }
+  private var pointerLocked: Bool {
+    pointer.isLoading || pointer.isApplying || !pointer.available
+  }
+  private var cursorLocked: Bool { cursor.isLoading || cursor.isApplying || !cursor.available }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      if let error {
+        DeckNotice(message: error) {
+          Button("Full Disk Access…") { CursorColorMenu.openFullDiskAccess() }
+        }
+        DeckSeparator(leadingInset: 0)
+      }
+
+      CursorSwatchGrid(cursor: cursor)
+
+      DeckSeparator(leadingInset: 0)
+
+      VStack(alignment: .leading, spacing: 6) {
+        DeckSectionLabel(title: "Pointer Size")
+        PointerSizeChips(current: pointer.available ? pointer.settings.scale : nil) { scale in
+          Task {
+            await pointer.apply(
+              PointerSettings(scale: scale, shakeToFind: pointer.settings.shakeToFind))
+          }
+        }
+        .disabled(pointerLocked)
+      }
+
+      HStack {
+        Text("Shake to Find Pointer").font(DeckStyle.rowTitle).accessibilityHidden(true)
+        Spacer(minLength: 8)
+        Toggle(
+          "Shake to Find Pointer",
+          isOn: Binding(
+            get: { pointer.settings.shakeToFind },
+            set: { enabled in
+              Task {
+                await pointer.apply(
+                  PointerSettings(scale: pointer.settings.scale, shakeToFind: enabled))
+              }
+            })
+        )
+        .toggleStyle(.switch).controlSize(.small).labelsHidden()
+      }
+      .disabled(pointerLocked)
+
+      DeckSeparator(leadingInset: 0)
+
+      VStack(alignment: .leading, spacing: 0) {
+        Button("Save Current Combination") { cursor.palettes.save(cursor.colors) }
+          .disabled(cursorLocked || cursor.palettes.matching(cursor.colors) != nil)
+        Button("Custom Colors…", action: onCustom)
+        Button("Refresh Cursor Settings") {
+          Task {
+            await cursor.refresh()
+            await pointer.refresh()
+          }
+        }
+        .disabled(
+          cursor.isRefreshing || cursor.isApplying || pointer.isRefreshing
+            || pointer.isApplying)
+        Button("Open Pointer Settings…") { CursorColorMenu.openPointerSettings() }
+      }
+      .buttonStyle(DeckActionButtonStyle())
+      // Lets the action titles line up with the content while their
+      // highlight still spans a comfortable target.
+      .padding(.horizontal, -DeckActionButtonStyle.textInset)
+    }
+    .padding(14)
+    .frame(width: Self.width)
+  }
+}
+
+/// Every color choice for the pointer as chips: solid presets, combinations,
+/// then saved combinations.
+@MainActor
+struct CursorSwatchGrid: View {
+  @ObservedObject var cursor: CursorColorController
+  var chipSize: CGFloat = 28
+  var spacing: CGFloat = 4
+  /// Receives the colors macOS reports after the change.
+  var onChoose: (CursorColors) -> Void = { _ in }
+
+  // Nine solid presets, so that group fills exactly one row.
+  private static let columns = 9
+
+  private struct Choice: Identifiable {
+    let id: String
+    let name: String
+    let colors: CursorColors
+  }
+
+  private var locked: Bool { cursor.isLoading || cursor.isApplying || !cursor.available }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      group(
+        "Solid Colors",
+        CursorPreset.solidPresets.map {
+          Choice(id: "p-\($0.id)", name: $0.rawValue, colors: $0.colors)
+        })
+      group(
+        "Combinations",
+        CursorPreset.combinationPresets.map {
+          Choice(id: "p-\($0.id)", name: $0.rawValue, colors: $0.colors)
+        })
+      if !cursor.palettes.savedColors.isEmpty {
+        group(
+          "Saved Combinations",
+          cursor.palettes.savedColors.map {
+            Choice(id: "s-\($0.id)", name: $0.name, colors: $0.colors)
+          })
+      }
+    }
+  }
+
+  private func group(_ title: String, _ choices: [Choice]) -> some View {
+    VStack(alignment: .leading, spacing: 6) {
+      DeckSectionLabel(title: title)
+      LazyVGrid(
+        columns: Array(
+          repeating: GridItem(.fixed(chipSize), spacing: spacing), count: Self.columns),
+        alignment: .leading, spacing: spacing
+      ) {
+        ForEach(choices) { swatch($0) }
+      }
+      .fixedSize()
+    }
+  }
+
+  private func swatch(_ choice: Choice) -> some View {
+    let selected =
+      cursor.colors.matches(choice.colors)
+      && cursor.colors.customized == choice.colors.customized
+    let shape = RoundedRectangle(cornerRadius: chipSize * 0.27, style: .continuous)
+    return Button {
+      Task {
+        await cursor.apply(choice.colors)
+        onChoose(cursor.colors)
+      }
+    } label: {
+      CursorArrowTile(colors: choice.colors, size: chipSize)
+        .overlay {
+          shape.strokeBorder(
+            selected ? Color.accentColor : DeckStyle.cardStroke, lineWidth: selected ? 2 : 1)
+        }
+    }
+    .buttonStyle(SwatchButtonStyle(shape: shape))
+    .disabled(locked)
+    .accessibilityLabel(choice.name)
+    .accessibilityAddTraits(selected ? .isSelected : [])
+    .help(choice.name)
+  }
+}
+
+private struct SwatchButtonStyle: ButtonStyle {
+  let shape: RoundedRectangle
+  @ViewState<Bool> private var hovered = false
+  @Environment(\.isEnabled) private var enabled
+
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .overlay {
+        shape.fill(
+          enabled && configuration.isPressed
+            ? DeckStyle.pressedFill : (enabled && hovered ? DeckStyle.hoverFill : .clear))
+      }
+      .contentShape(shape)
+      .opacity(enabled ? 1 : 0.45)
+      .onHover { hovered = $0 }
   }
 }
 
@@ -200,6 +331,8 @@ struct CursorColorsPane: View {
   @ViewState<CursorColors> private var draft = .standard
   @ViewState<String> private var name = ""
   @ViewState<String?> private var savedMessage = nil
+
+  private let inset = DeckStyle.cardInset
 
   private var canApply: Bool {
     cursor.available && !cursor.isLoading && !cursor.isApplying && draft.isValid
@@ -214,119 +347,121 @@ struct CursorColorsPane: View {
   }
 
   var body: some View {
-    ScrollView {
-      VStack(alignment: .leading, spacing: 18) {
-        VStack(alignment: .leading, spacing: 4) {
-          Text("Cursor Settings").font(.system(size: 17, weight: .semibold))
-          Text("Adjust your Mac’s pointer size, visibility, and colors.").font(.system(size: 12))
-            .foregroundStyle(
-              .secondary)
+    PaneScaffold {
+      PaneHeader(
+        title: "Cursor", subtitle: "Adjust your Mac’s pointer size, visibility, and colors."
+      ) {
+        Button {
+          Task {
+            await cursor.refresh()
+            await pointer.refresh()
+          }
+        } label: {
+          if cursor.isRefreshing || pointer.isRefreshing {
+            ProgressView().controlSize(.small)
+          } else {
+            Image(systemName: "arrow.clockwise")
+          }
         }
+        .buttonStyle(.borderless)
+        .disabled(
+          cursor.isRefreshing || cursor.isApplying || pointer.isRefreshing
+            || pointer.isApplying
+        )
+        .help("Refresh cursor settings").accessibilityLabel("Refresh cursor settings")
+      }
+
+      PaneSection(title: "Pointer") {
         PointerControlsView(pointer: pointer)
-        Divider()
-        Text("Cursor Colors").font(.system(size: 14, weight: .semibold))
-        HStack(spacing: 1) {
+      }
+
+      PaneSection(title: "Colors") {
+        HStack(spacing: 0) {
           sample(background: .white, name: "Light background")
           sample(background: Color(white: 0.12), name: "Dark background")
         }
-        .frame(height: 104).clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.12)) }
+        .frame(height: 96)
+        .clipShape(DeckStyle.row)
+        .overlay { DeckStyle.row.strokeBorder(DeckStyle.cardStroke) }
+        .padding(inset)
 
-        CursorColorMenu(
-          cursor: cursor, pointer: pointer, onCustom: {},
-          onChoose: { draft = $0 }, showCustom: false
-        )
-        .frame(maxWidth: 330)
+        DeckSeparator(leadingInset: inset)
 
-        VStack(spacing: 14) {
-          ColorPicker("Fill color", selection: colorBinding(fill: true), supportsOpacity: false)
-            .accessibilityLabel("Cursor fill color")
-          ColorPicker("Outline color", selection: colorBinding(fill: false), supportsOpacity: false)
+        CursorSwatchGrid(cursor: cursor, chipSize: 34, spacing: 8, onChoose: { draft = $0 })
+          .padding(inset)
+
+        DeckSeparator(leadingInset: inset)
+
+        VStack(alignment: .leading, spacing: 12) {
+          HStack(spacing: 28) {
+            ColorPicker("Fill color", selection: colorBinding(fill: true), supportsOpacity: false)
+              .accessibilityLabel("Cursor fill color")
+            ColorPicker(
+              "Outline color", selection: colorBinding(fill: false), supportsOpacity: false
+            )
             .accessibilityLabel("Cursor outline color")
-        }.font(.system(size: 13)).frame(maxWidth: 330)
+          }
+          .font(DeckStyle.rowTitle)
           .disabled(cursor.isLoading || cursor.isApplying)
 
-        TextField("Combination name (optional)", text: $name)
-          .textFieldStyle(.roundedBorder).frame(maxWidth: 330)
-          .accessibilityLabel("Saved combination name")
+          TextField("Combination name (optional)", text: $name)
+            .textFieldStyle(.roundedBorder).frame(maxWidth: 320)
+            .accessibilityLabel("Saved combination name")
 
-        HStack(spacing: 12) {
-          Button(cursor.isApplying ? "Applying…" : "Save & Apply") {
-            let requested = draft
-            saveDraft()
-            Task { await cursor.apply(requested) }
-          }.buttonStyle(.borderedProminent).disabled(!canApply)
-          Button("Save Combination", action: saveDraft).disabled(!canSave)
-          Button("Reset to Default") {
-            draft = .standard
-            Task { await cursor.apply(.standard) }
-          }.disabled(!cursor.available || cursor.isApplying || cursor.isLoading)
+          HStack(spacing: 8) {
+            Button(cursor.isApplying ? "Applying…" : "Save & Apply") {
+              let requested = draft
+              saveDraft()
+              Task { await cursor.apply(requested) }
+            }.buttonStyle(.borderedProminent).disabled(!canApply)
+            Button("Save Combination", action: saveDraft).disabled(!canSave)
+            Button("Reset to Default") {
+              Task {
+                await cursor.apply(.standard)
+                draft = cursor.colors
+              }
+            }.disabled(!cursor.available || cursor.isApplying || cursor.isLoading)
+          }
+
+          VStack(alignment: .leading, spacing: 4) {
+            Text(
+              "Save Combination keeps these colors for later. Save & Apply also changes the pointer."
+            )
+            .fixedSize(horizontal: false, vertical: true)
+            if let savedMessage { Text(savedMessage) }
+          }
+          .font(DeckStyle.caption).foregroundStyle(.secondary)
         }
-        Text(
-          "Save Combination keeps these colors for later. Save & Apply also changes the pointer."
-        )
-        .font(.system(size: 11)).foregroundStyle(.secondary)
-        if let savedMessage {
-          Text(savedMessage).font(.system(size: 11)).foregroundStyle(.secondary)
-        }
+        .padding(inset)
 
         if let error = cursor.error {
-          VStack(alignment: .leading, spacing: 8) {
-            Label(error, systemImage: "exclamationmark.circle.fill")
-              .font(.system(size: 12)).foregroundStyle(.primary).fixedSize(
-                horizontal: false, vertical: true)
-            HStack {
-              Button("Refresh") { Task { await cursor.refresh() } }
-              Button("Full Disk Access…") { CursorColorMenu.openFullDiskAccess() }
-              Button("Open Pointer Settings…") { CursorColorMenu.openPointerSettings() }
-            }.font(.system(size: 12))
+          DeckSeparator(leadingInset: inset)
+          DeckNotice(message: error) {
+            Button("Refresh") { Task { await cursor.refresh() } }
+            Button("Full Disk Access…") { CursorColorMenu.openFullDiskAccess() }
+            Button("Open Pointer Settings…") { CursorColorMenu.openPointerSettings() }
           }
+          .padding(inset)
         }
+      }
 
-        VStack(alignment: .leading, spacing: 8) {
-          Text("Saved Combinations").font(.system(size: 14, weight: .semibold))
-          if cursor.palettes.savedColors.isEmpty {
-            Text("Save a fill and outline pair to reuse it here or in the dropdown.")
-              .font(.system(size: 12)).foregroundStyle(.secondary)
-          } else {
-            ForEach(cursor.palettes.savedColors) { saved in
-              HStack(spacing: 10) {
-                CursorArrowPreview(colors: saved.colors).frame(width: 20, height: 26)
-                Text(saved.name).font(.system(size: 13)).lineLimit(1).help(saved.name)
-                Spacer()
-                if cursor.palettes.matching(cursor.colors)?.id == saved.id {
-                  Label("Current", systemImage: "checkmark")
-                    .font(.system(size: 11)).foregroundStyle(.secondary)
-                }
-                Button("Apply") {
-                  name = ""
-                  Task {
-                    await cursor.apply(saved.colors)
-                    draft = cursor.colors
-                  }
-                }.disabled(
-                  cursor.isLoading || cursor.isApplying || !cursor.available
-                    || (cursor.colors.matches(saved.colors)
-                      && cursor.colors.customized == saved.colors.customized)
-                )
-                Button {
-                  cursor.palettes.remove(saved.id)
-                } label: {
-                  Image(systemName: "trash")
-                }.buttonStyle(.borderless)
-                  .disabled(cursor.palettes.matching(cursor.colors)?.id == saved.id)
-                  .help(
-                    cursor.palettes.matching(cursor.colors)?.id == saved.id
-                      ? "Choose another combination before removing the current one."
-                      : "Remove \(saved.name)"
-                  )
-                  .accessibilityLabel("Remove saved combination \(saved.name)")
-              }.padding(.vertical, 5)
+      PaneSection(title: "Saved Combinations") {
+        if cursor.palettes.savedColors.isEmpty {
+          Text("Save a fill and outline pair to reuse it here or in the dropdown.")
+            .font(DeckStyle.value).foregroundStyle(.secondary)
+            .padding(inset)
+        } else {
+          ForEach(Array(cursor.palettes.savedColors.enumerated()), id: \.element.id) {
+            index, saved in
+            if index > 0 {
+              DeckSeparator(leadingInset: inset + DeckStyle.tileSize + DeckStyle.rowSpacing)
             }
+            savedRow(saved)
           }
         }
       }
-      .padding(22).frame(maxWidth: .infinity, alignment: .leading)
+
+      Button("Open Pointer Settings…") { CursorColorMenu.openPointerSettings() }
     }
     .onAppear { draft = cursor.colors }
     .onChange(of: cursor.colors) { old, new in if draft == old { draft = new } }
@@ -334,6 +469,47 @@ struct CursorColorsPane: View {
       await cursor.refresh(clearError: false)
       await pointer.refresh(clearError: false)
     }
+  }
+
+  private func savedRow(_ saved: SavedCursorPalette) -> some View {
+    let isCurrent = cursor.palettes.matching(cursor.colors)?.id == saved.id
+    return HStack(spacing: DeckStyle.rowSpacing) {
+      CursorArrowTile(colors: saved.colors)
+      Text(saved.name).font(DeckStyle.rowTitle).lineLimit(1).help(saved.name)
+      Spacer(minLength: 8)
+      if isCurrent {
+        Label("Current", systemImage: "checkmark")
+          .font(DeckStyle.caption).foregroundStyle(.secondary)
+      }
+      Button("Apply") {
+        name = ""
+        Task {
+          await cursor.apply(saved.colors)
+          draft = cursor.colors
+        }
+      }
+      .controlSize(.small)
+      .disabled(
+        cursor.isLoading || cursor.isApplying || !cursor.available
+          || (cursor.colors.matches(saved.colors)
+            && cursor.colors.customized == saved.colors.customized)
+      )
+      Button {
+        cursor.palettes.remove(saved.id)
+      } label: {
+        Image(systemName: "trash")
+      }
+      .buttonStyle(.borderless)
+      .disabled(isCurrent)
+      .help(
+        isCurrent
+          ? "Choose another combination before removing the current one."
+          : "Remove \(saved.name)"
+      )
+      .accessibilityLabel("Remove saved combination \(saved.name)")
+    }
+    .padding(.horizontal, inset)
+    .frame(minHeight: 44)
   }
 
   private func saveDraft() {

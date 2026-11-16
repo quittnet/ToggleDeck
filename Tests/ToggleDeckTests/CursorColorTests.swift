@@ -225,7 +225,7 @@ struct CursorColorTests {
     #expect(controller.error == "The color service rejected this change.")
     #expect(!controller.isApplying)
     let failedCounts = await backend.counts()
-    #expect(failedCounts.reads == 1)
+    #expect(failedCounts.reads == 2)
     #expect(failedCounts.writes == 1)
     await backend.setWriterFailure(nil)
     await controller.apply(CursorPreset.red.colors)
@@ -254,7 +254,8 @@ struct CursorColorTests {
     #expect(controller.colors == original)
     #expect(controller.error == nil)
     let counts = await backend.counts()
-    #expect(counts.reads == 3)
+    // Initial read, failed-write read-back, and two refreshes.
+    #expect(counts.reads == 4)
     #expect(counts.writes == 1)
   }
 
@@ -276,7 +277,8 @@ struct CursorColorTests {
     #expect(controller.available)
     #expect(!controller.isRefreshing)
     let counts = await backend.counts()
-    #expect(counts.reads == 2)
+    // Initial read, failed-write read-back, and the automatic refresh.
+    #expect(counts.reads == 3)
     #expect(counts.writes == 1)
   }
 
@@ -355,7 +357,7 @@ struct CursorColorTests {
 
   @MainActor
   @Test
-  func testRepeatedRefreshIsIgnoredWhileReadIsPending() async {
+  func testRepeatedRefreshWhileReadIsPendingReplaysOnce() async {
     let backend = CursorColorBackend()
     let controller = makeController(using: backend)
     await backend.pauseNextRead()
@@ -366,8 +368,106 @@ struct CursorColorTests {
     #expect(counts.reads == 1)
     await backend.releaseRead()
     await firstRefresh.value
+    for _ in 0..<200 {
+      let reads = await backend.counts().reads
+      if reads >= 2 && !controller.isRefreshing { break }
+      try? await Task.sleep(for: .milliseconds(2))
+    }
+    let settled = await backend.counts()
+    #expect(settled.reads == 2)
     #expect(controller.available)
     #expect(!controller.isRefreshing)
+  }
+
+  @MainActor
+  @Test
+  func testRejectedWriteRereadsActualColors() async {
+    let backend = CursorColorBackend(value: CursorPreset.blue.colors)
+    let failure = "The color service rejected this change."
+    let controller = CursorColorController(
+      reader: { await backend.read() },
+      writer: { _ in
+        // The native setter changed WindowServer before persistence failed.
+        await backend.setValue(CursorPreset.green.colors)
+        return failure
+      })
+    await controller.refresh()
+    await controller.apply(CursorPreset.red.colors)
+    #expect(controller.colors == CursorPreset.green.colors)
+    #expect(controller.available)
+    #expect(controller.error == failure)
+    #expect(!controller.isApplying)
+  }
+
+  @MainActor
+  @Test
+  func testRejectedWriteWithUnreadableColorsMarksUnavailable() async {
+    let backend = CursorColorBackend(value: CursorPreset.blue.colors)
+    let failure = "The color service rejected this change."
+    let controller = CursorColorController(
+      reader: { await backend.read() },
+      writer: { _ in
+        await backend.setValue(nil)
+        return failure
+      })
+    await controller.refresh()
+    await controller.apply(CursorPreset.red.colors)
+    #expect(!controller.available)
+    #expect(controller.error == failure)
+  }
+
+  @MainActor
+  @Test
+  func testRefreshRequestedDuringReadRunsAgainAfterItFinishes() async {
+    let backend = CursorColorBackend(value: CursorPreset.blue.colors)
+    let controller = makeController(using: backend)
+    await backend.pauseNextRead()
+    let first = Task { await controller.refresh() }
+    await backend.waitUntilReadPaused()
+    await controller.refresh(clearError: false)
+    await backend.setValue(CursorPreset.green.colors)
+    await backend.releaseRead()
+    await first.value
+    for _ in 0..<200 where controller.colors != CursorPreset.green.colors {
+      try? await Task.sleep(for: .milliseconds(2))
+    }
+    #expect(controller.colors == CursorPreset.green.colors)
+    #expect(!controller.isRefreshing && !controller.isApplying)
+    let counts = await backend.counts()
+    #expect(counts.reads == 2)
+  }
+
+  @MainActor
+  @Test
+  func testRefreshRequestedDuringWriteRunsAfterItFinishes() async {
+    let backend = CursorColorBackend()
+    let controller = makeController(using: backend)
+    await controller.refresh()
+    await backend.pauseNextWrite()
+    let applying = Task { await controller.apply(CursorPreset.blue.colors) }
+    await backend.waitUntilWritePaused()
+    await controller.refresh(clearError: false)
+    await backend.releaseWrite()
+    await applying.value
+    for _ in 0..<200 {
+      let reads = await backend.counts().reads
+      if reads >= 3 { break }
+      try? await Task.sleep(for: .milliseconds(2))
+    }
+    let counts = await backend.counts()
+    #expect(counts.reads == 3 && counts.writes == 1)
+    #expect(controller.colors == CursorPreset.blue.colors)
+  }
+
+  @MainActor
+  @Test
+  func testPreviewIgnoresQueuedRefresh() async {
+    let backend = CursorColorBackend()
+    let controller = CursorColorController(
+      preview: true, reader: { await backend.read() }, writer: { await backend.write($0) })
+    await controller.refresh()
+    let counts = await backend.counts()
+    #expect(counts.reads == 0)
   }
 
   @MainActor

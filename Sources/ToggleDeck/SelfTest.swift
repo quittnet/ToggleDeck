@@ -11,28 +11,48 @@ enum SelfTest {
   /// TCC-gated: TCC attributes a request to the responsible process, so a
   /// binary exec'd from a terminal is judged against the terminal's
   /// entitlements, not the app bundle's.
-  static func run(verbose: Bool) {
+  ///
+  /// Returns the process exit code: 1 for duplicate ids or an unwritable
+  /// `--out`, 0 otherwise. Entries unavailable on this Mac are hardware
+  /// dependent and never fail the run.
+  static func run(verbose: Bool, out: String? = nil) -> Int32 {
+    let (report, duplicates) = build(verbose: verbose)
+    var code: Int32 = duplicates.isEmpty ? 0 : 1
+    if let failure = deliver(report, to: out) {
+      FileHandle.standardError.write(Data("could not write \(out ?? ""): \(failure)\n".utf8))
+      code = 1
+    }
+    return code
+  }
+
+  /// Prints the report, or writes it to `path`. Returns the failure text.
+  static func deliver(_ report: String, to path: String?) -> String? {
+    guard let path else {
+      print(report, terminator: "")
+      return nil
+    }
+    do {
+      try report.write(toFile: path, atomically: true, encoding: .utf8)
+      return nil
+    } catch {
+      return error.localizedDescription
+    }
+  }
+
+  static func duplicateIDs(in specs: [ToggleSpec]) -> [String] {
+    var seen = Set<String>()
+    return specs.filter { !seen.insert($0.id).inserted }.map(\.id)
+  }
+
+  private static func build(verbose: Bool) -> (report: String, duplicates: [String]) {
     var sink = ""
     func print(_ s: String = "") { sink += s + "\n" }
 
-    defer {
-      let args = CommandLine.arguments
-      if let i = args.firstIndex(of: "--out"), i + 1 < args.count {
-        try? sink.write(toFile: args[i + 1], atomically: true, encoding: .utf8)
-      } else {
-        Swift.print(sink, terminator: "")
-      }
-    }
-
     let start = Date()
     var unsupported: [ToggleSpec] = []
-    var duplicates: [String] = []
-    var seen = Set<String>()
+    let duplicates = duplicateIDs(in: Catalog.all)
+    let uniqueCount = Set(Catalog.all.map(\.id)).count
     var slow: [(String, TimeInterval)] = []
-
-    for spec in Catalog.all where !seen.insert(spec.id).inserted {
-      duplicates.append(spec.id)
-    }
 
     var byCategory: [Category: [(ToggleSpec, ToggleState)]] = [:]
 
@@ -50,7 +70,7 @@ enum SelfTest {
     print("catalog entries : \(Catalog.all.count)")
     print("categories      : \(Category.allCases.count)")
     print(
-      "unique ids      : \(seen.count)\(duplicates.isEmpty ? "" : "  DUPLICATES: \(duplicates)")")
+      "unique ids      : \(uniqueCount)\(duplicates.isEmpty ? "" : "  DUPLICATES: \(duplicates)")")
     print("unavailable here: \(unsupported.count)")
     print("elapsed         : \(String(format: "%.2fs", Date().timeIntervalSince(start)))")
     print("")
@@ -110,5 +130,7 @@ enum SelfTest {
     print(
       "Pinned by default: \(Catalog.defaultPinned.count) "
         + "(all resolve: \(Catalog.defaultPinned.allSatisfy { Catalog.byID[$0] != nil }))")
+
+    return (sink, duplicates)
   }
 }
