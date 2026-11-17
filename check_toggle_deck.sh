@@ -16,5 +16,7 @@ if [ -d "$TEST_PLUGIN_DIR" ]; then
 fi
 # The `+` form matters on the system bash (3.2): with `set -u`, expanding an
 # empty array as "${array[@]}" is an unbound-variable error there.
-swift test --enable-swift-testing --disable-xctest ${TEST_PLUGIN_ARGS[@]+"${TEST_PLUGIN_ARGS[@]}"} -Xswiftc -warnings-as-errors
-swift build -c release -Xswiftc -warnings-as-errors
+MACOS_SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
+BUILD_ARGS=(-Xswiftc -warnings-as-errors -Xswiftc -Xclang-linker -Xswiftc "-isysroot$MACOS_SDK_PATH")
+swift test --enable-swift-testing --disable-xctest ${TEST_PLUGIN_ARGS[@]+"${TEST_PLUGIN_ARGS[@]}"} "${BUILD_ARGS[@]}"
+swift build -c release "${BUILD_ARGS[@]}"

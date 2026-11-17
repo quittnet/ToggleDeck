@@ -38,7 +38,7 @@ struct CursorArrowTile: View {
   var size: CGFloat = DeckStyle.tileSize
 
   var body: some View {
-    RoundedRectangle(cornerRadius: size * 0.27, style: .continuous)
+    Circle()
       .fill(DeckStyle.quietFill)
       .frame(width: size, height: size)
       .overlay {
@@ -285,7 +285,6 @@ struct CursorSwatchGrid: View {
     let selected =
       cursor.colors.matches(choice.colors)
       && cursor.colors.customized == choice.colors.customized
-    let shape = RoundedRectangle(cornerRadius: chipSize * 0.27, style: .continuous)
     return Button {
       Task {
         await cursor.apply(choice.colors)
@@ -293,12 +292,17 @@ struct CursorSwatchGrid: View {
       }
     } label: {
       CursorArrowTile(colors: choice.colors, size: chipSize)
-        .overlay {
-          shape.strokeBorder(
-            selected ? Color.accentColor : DeckStyle.cardStroke, lineWidth: selected ? 2 : 1)
+        .overlay(alignment: .bottomTrailing) {
+          if selected {
+            Image(systemName: "checkmark.circle.fill")
+              .font(.system(size: chipSize * 0.4, weight: .bold))
+              .symbolRenderingMode(.palette)
+              .foregroundStyle(Color(nsColor: .controlBackgroundColor), Color.primary)
+              .accessibilityHidden(true)
+          }
         }
     }
-    .buttonStyle(SwatchButtonStyle(shape: shape))
+    .buttonStyle(SwatchButtonStyle())
     .disabled(locked)
     .accessibilityLabel(choice.name)
     .accessibilityAddTraits(selected ? .isSelected : [])
@@ -307,18 +311,17 @@ struct CursorSwatchGrid: View {
 }
 
 private struct SwatchButtonStyle: ButtonStyle {
-  let shape: RoundedRectangle
   @ViewState<Bool> private var hovered = false
   @Environment(\.isEnabled) private var enabled
 
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
       .overlay {
-        shape.fill(
+        Circle().fill(
           enabled && configuration.isPressed
             ? DeckStyle.pressedFill : (enabled && hovered ? DeckStyle.hoverFill : .clear))
       }
-      .contentShape(shape)
+      .contentShape(Circle())
       .opacity(enabled ? 1 : 0.45)
       .onHover { hovered = $0 }
   }

@@ -28,10 +28,8 @@ enum RenderTest {
         NSHostingView(
           rootView: DropdownView(
             engine: engine, settings: settingsModel, cursor: cursor, pointer: pointer,
-            audio: audio, onOpenSettings: {}, onQuit: {}, previewSpecs: specs
+            audio: audio, onOpenSettings: {}, onQuit: {}, previewSpecs: specs, offscreen: true
           )
-          // The live popover supplies a material; a captured view has none.
-          .background(DeckStyle.panelFallback)
           .environment(\.colorScheme, dark ? .dark : .light)), dark: dark)
     }
     func pane(_ section: SettingsSection, dark: Bool = false) -> NSWindow {

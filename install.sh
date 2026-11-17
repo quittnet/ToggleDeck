@@ -26,7 +26,10 @@ done
 
 echo "Building..."
 cd "$SCRIPT_DIR"
-swift build -c release -Xswiftc -warnings-as-errors
+# AppKit chooses the popover appearance from the linked SDK. Give clang the
+# actual SDK so SwiftPM doesn't record the macOS 14 deployment minimum as the SDK.
+MACOS_SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
+swift build -c release -Xswiftc -warnings-as-errors -Xswiftc -Xclang-linker -Xswiftc "-isysroot$MACOS_SDK_PATH"
 
 # Package the source artwork when it changes, or when regeneration is requested.
 if [ ! -f "$SCRIPT_DIR/AppIcon.icns" ] || [ "$REGEN_ICON" -eq 1 ] || [ "$SCRIPT_DIR/AppIcon.png" -nt "$SCRIPT_DIR/AppIcon.icns" ]; then

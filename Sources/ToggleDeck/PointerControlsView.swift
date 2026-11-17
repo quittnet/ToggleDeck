@@ -161,7 +161,7 @@ private struct ChoiceChipButtonStyle: ButtonStyle {
   @Environment(\.isEnabled) private var enabled
 
   func makeBody(configuration: Configuration) -> some View {
-    let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
+    let shape = Capsule()
     // The resting fill is already as strong as a row's hover, so hover and
     // press step up from it.
     let fill: Color =

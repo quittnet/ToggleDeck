@@ -8,8 +8,8 @@ import SwiftUI
 enum DeckStyle {
   // MARK: Geometry
 
-  static let cardRadius: CGFloat = 10
-  static let rowRadius: CGFloat = 7
+  static let cardRadius: CGFloat = 18
+  static let rowRadius: CGFloat = 12
   static let tileSize: CGFloat = 26
   static let smallTileSize: CGFloat = 20
   /// Card edge to row content.
@@ -34,7 +34,7 @@ enum DeckStyle {
   static let rowSubtitle = Font.system(size: 11)
   static let value = Font.system(size: 12)
   static let caption = Font.system(size: 11)
-  static let sectionLabel = Font.system(size: 11, weight: .semibold)
+  static let sectionLabel = Font.system(size: 12, weight: .semibold)
   static let cardTitle = Font.system(size: 13, weight: .semibold)
   static let paneTitle = Font.system(size: 22, weight: .bold)
   static let paneSubtitle = Font.system(size: 12.5)
@@ -43,13 +43,13 @@ enum DeckStyle {
 
   // Strengths of black or white ink, so one value works on the popover
   // material, on a window background, and in both appearances.
-  static let cardFill = ink(0.038, increased: 0.05)
   static let cardStroke = ink(0.06, increased: 0.4)
   static let hoverFill = ink(0.06, increased: 0.1)
   static let pressedFill = ink(0.1, increased: 0.16)
+  static let focusFill = ink(0.14, increased: 0.3)
   static let quietFill = ink(0.068, increased: 0.12)
-  static let separator = ink(0.077, increased: 0.35)
-  static let switchOff = ink(0.17, increased: 0.45)
+  static let separator = ink(0.065, increased: 0.35)
+  static let switchOff = ink(0.23, increased: 0.45)
   static let warning = Color.orange
   /// Opaque stand-in for the popover material where none exists, such as an
   /// offscreen snapshot.
@@ -79,9 +79,6 @@ enum DeckStyle {
     RoundedRectangle(cornerRadius: rowRadius, style: .continuous)
   }
 
-  static var searchField: RoundedRectangle {
-    RoundedRectangle(cornerRadius: 8, style: .continuous)
-  }
 }
 
 extension Category {
@@ -103,7 +100,7 @@ extension Category {
 
 // MARK: - Building blocks
 
-/// A rounded tile holding one SF Symbol: tinted with a white glyph when lit,
+/// A circular tile holding one SF Symbol: tinted with a white glyph when lit,
 /// quiet when not.
 struct IconTile: View {
   let symbol: String
@@ -113,7 +110,7 @@ struct IconTile: View {
   var size: CGFloat = DeckStyle.tileSize
 
   var body: some View {
-    RoundedRectangle(cornerRadius: size * 0.27, style: .continuous)
+    Circle()
       .fill(isLit ? AnyShapeStyle(tint.gradient) : AnyShapeStyle(DeckStyle.quietFill))
       .frame(width: size, height: size)
       .overlay {
@@ -123,7 +120,7 @@ struct IconTile: View {
           .fontWeight(.semibold)
           .foregroundStyle(isLit ? AnyShapeStyle(Color.white) : AnyShapeStyle(Color.secondary))
           .opacity(isDimmed ? 0.5 : 1)
-          .frame(width: size * 0.56, height: size * 0.56)
+          .frame(width: size * 0.53, height: size * 0.53)
       }
       .accessibilityHidden(true)
   }
@@ -169,7 +166,8 @@ struct DeckSeparator: View {
 
   var body: some View {
     Rectangle().fill(DeckStyle.separator).frame(height: 1)
-      .padding(.leading, leadingInset).accessibilityHidden(true)
+      .padding(.leading, leadingInset).padding(.trailing, DeckStyle.rowInset)
+      .accessibilityHidden(true)
   }
 }
 
@@ -182,22 +180,75 @@ struct DeckSectionLabel: View {
   }
 }
 
+/// One material per group of controls. The lightweight surface also draws in
+/// ImageRenderer, which cannot capture the window server's glass effect.
+private struct DeckSurface<S: InsettableShape>: View {
+  let shape: S
+  var nativeGlass = false
+  @Environment(\.colorScheme) private var scheme
+  @Environment(\.colorSchemeContrast) private var contrast
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+  var body: some View {
+    surface
+      .overlay {
+        if contrast == .increased {
+          shape.strokeBorder(DeckStyle.cardStroke, lineWidth: 1)
+        }
+      }
+      .allowsHitTesting(false).accessibilityHidden(true)
+  }
+
+  @ViewBuilder private var surface: some View {
+    if reduceTransparency {
+      shape.fill(Color(nsColor: .controlBackgroundColor))
+        .overlay { shape.strokeBorder(DeckStyle.cardStroke, lineWidth: 1) }
+    } else {
+      #if compiler(>=6.2)
+        if #available(macOS 26.0, *), nativeGlass {
+          // Keep the backdrop visible. A neutral shade under light lettering
+          // preserves contrast when a bright window sits behind dark glass.
+          shape.fill(.black.opacity(scheme == .dark ? 0.35 : 0))
+            .glassEffect(.clear, in: shape)
+        } else {
+          frostedSurface
+        }
+      #else
+        frostedSurface
+      #endif
+    }
+  }
+
+  private var frostedSurface: some View {
+    let dark = scheme == .dark
+    // Light mode needs a firmer fill and a contact shadow, or the card's
+    // lower edge dissolves into the window background.
+    return shape.fill(.white.opacity(dark ? 0.085 : 0.66))
+      .shadow(color: .black.opacity(dark ? 0 : 0.07), radius: 1.5, y: 1)
+      .overlay {
+        shape.strokeBorder(
+          LinearGradient(
+            colors: [.white.opacity(dark ? 0.22 : 0.82), DeckStyle.cardStroke],
+            startPoint: .top, endPoint: .bottom),
+          lineWidth: 1)
+      }
+  }
+}
+
 extension View {
-  /// The grouped container behind a set of rows.
-  func deckCard() -> some View {
-    background(DeckStyle.cardFill, in: DeckStyle.card)
-      .overlay { DeckStyle.card.strokeBorder(DeckStyle.cardStroke, lineWidth: 1) }
+  func deckCard(nativeGlass: Bool = false) -> some View {
+    background { DeckSurface(shape: DeckStyle.card, nativeGlass: nativeGlass) }
+  }
+
+  func deckCapsule(nativeGlass: Bool = false) -> some View {
+    background { DeckSurface(shape: Capsule(), nativeGlass: nativeGlass) }
   }
 
   /// The frame of an inline search field. The caller supplies the icon, the
   /// text field and any buttons, with its own horizontal padding.
-  func deckSearchField(isFocused: Bool) -> some View {
+  func deckSearchField(nativeGlass: Bool = false) -> some View {
     frame(height: DeckStyle.searchFieldHeight)
-      .background(DeckStyle.cardFill, in: DeckStyle.searchField)
-      .overlay {
-        DeckStyle.searchField.strokeBorder(
-          isFocused ? Color.accentColor.opacity(0.8) : DeckStyle.cardStroke, lineWidth: 1)
-      }
+      .deckCapsule(nativeGlass: nativeGlass)
   }
 }
 
@@ -262,18 +313,17 @@ struct DeckRowButtonStyle: ButtonStyle {
 
   func makeBody(configuration: Configuration) -> some View {
     let active = enabled && highlights
-    configuration.label
+    let fill: Color
+    if active && configuration.isPressed {
+      fill = DeckStyle.pressedFill
+    } else if isFocused {
+      fill = DeckStyle.focusFill
+    } else {
+      fill = active && hovered ? DeckStyle.hoverFill : .clear
+    }
+    return configuration.label
       .background {
-        DeckStyle.row
-          .fill(
-            active && configuration.isPressed
-              ? DeckStyle.pressedFill : (active && hovered ? DeckStyle.hoverFill : .clear)
-          )
-          .padding(.horizontal, 3).padding(.vertical, 1)
-      }
-      .overlay {
-        DeckStyle.row.strokeBorder(isFocused ? Color.accentColor : .clear, lineWidth: 2)
-          .padding(.horizontal, 3).padding(.vertical, 1)
+        DeckStyle.row.fill(fill).padding(.horizontal, 3).padding(.vertical, 1)
       }
       .onHover { hovered = $0 }
   }

@@ -13,6 +13,10 @@ struct DropdownView: View {
   @ViewState<ControlFilter> private var filter = ControlFilter.all
   @FocusState private var searchFocused: Bool
   @FocusState private var focusedControl: String?
+  /// The row the arrow keys last moved to. A click also focuses a row, but
+  /// only keyboard focus is drawn, so a clicked row doesn't stay highlighted.
+  @ViewState<String?> private var keyboardFocus: String? = nil
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
   var onOpenSettings: () -> Void
   var onQuit: () -> Void
@@ -22,6 +26,7 @@ struct DropdownView: View {
   var onSizeChange: (CGSize) -> Void = { _ in }
   var previewSpecs: [ToggleSpec]?
   var snapshotSearch: String?
+  private let drawsOffscreen: Bool
 
   init(
     engine: ToggleEngine = .shared, settings: AppSettings = .shared,
@@ -31,7 +36,8 @@ struct DropdownView: View {
     onOpenCursorSettings: @escaping () -> Void = {},
     onOpenSoundSettings: @escaping () -> Void = {}, onClose: @escaping () -> Void = {},
     onSizeChange: @escaping (CGSize) -> Void = { _ in }, previewSpecs: [ToggleSpec]? = nil,
-    snapshotSearch: String? = nil, session: DropdownSession = DropdownSession()
+    snapshotSearch: String? = nil, offscreen: Bool = false,
+    session: DropdownSession = DropdownSession()
   ) {
     self.engine = engine
     self.settings = settings
@@ -47,6 +53,7 @@ struct DropdownView: View {
     self.onSizeChange = onSizeChange
     self.previewSpecs = previewSpecs
     self.snapshotSearch = snapshotSearch
+    self.drawsOffscreen = offscreen || snapshotSearch != nil
   }
 
   private var showsCursor: Bool {
@@ -136,9 +143,8 @@ struct DropdownView: View {
       footer
     }
     .frame(width: packed.width)
-    // The live popover shows its own material. ImageRenderer has none and
-    // would write a transparent PNG.
-    .background(snapshotSearch != nil ? DeckStyle.panelFallback : .clear)
+    // Both PNG exporters draw without the live popover's backdrop.
+    .background(drawsOffscreen || reduceTransparency ? DeckStyle.panelFallback : .clear)
     .background {
       GeometryReader { geometry in
         Color.clear.task(id: geometry.size) { onSizeChange(geometry.size) }
@@ -253,8 +259,8 @@ struct DropdownView: View {
       filterMenu
     }
     .font(DeckStyle.rowTitle)
-    .padding(.leading, 9).padding(.trailing, 4)
-    .deckSearchField(isFocused: searchFocused)
+    .padding(.leading, 12).padding(.trailing, 5)
+    .deckSearchField(nativeGlass: !drawsOffscreen)
   }
 
   @ViewBuilder
@@ -290,13 +296,16 @@ struct DropdownView: View {
       }
     } label: {
       if engine.isRefreshing && snapshotSearch == nil {
-        ProgressView().controlSize(.small).frame(width: 28, height: 28)
+        ProgressView().controlSize(.small).frame(
+          width: DeckStyle.searchFieldHeight, height: DeckStyle.searchFieldHeight)
       } else {
         Image(systemName: "arrow.clockwise").font(.system(size: 13, weight: .medium))
-          .foregroundStyle(.secondary).frame(width: 28, height: 28)
+          .foregroundStyle(.secondary).frame(
+            width: DeckStyle.searchFieldHeight, height: DeckStyle.searchFieldHeight)
       }
     }
-    .buttonStyle(DeckButtonStyle()).disabled(engine.isRefreshing)
+    .buttonStyle(DeckButtonStyle()).clipShape(Capsule()).deckCapsule(nativeGlass: !drawsOffscreen)
+    .disabled(engine.isRefreshing)
     .help("Refresh settings (Command-R)").accessibilityLabel("Refresh settings")
     .keyboardShortcut("r", modifiers: .command)
   }
@@ -304,7 +313,10 @@ struct DropdownView: View {
   @ViewBuilder
   private var moreMenu: some View {
     let label = Image(systemName: "ellipsis").font(.system(size: 13, weight: .medium))
-      .foregroundStyle(.secondary).frame(width: 28, height: 28)
+      .foregroundStyle(.secondary).frame(
+        width: DeckStyle.searchFieldHeight, height: DeckStyle.searchFieldHeight
+      )
+      .deckCapsule(nativeGlass: !drawsOffscreen)
     if snapshotSearch != nil {
       label
     } else {
@@ -383,7 +395,7 @@ struct DropdownView: View {
                 .overlay(alignment: .top) { if index > 0 { DeckSeparator() } }
             }
           }
-          .deckCard()
+          .deckCard(nativeGlass: !drawsOffscreen)
         }
       }
     }
@@ -412,7 +424,7 @@ struct DropdownView: View {
         }
       }
     }
-    .padding(.horizontal, 6).padding(.bottom, 6)
+    .padding(.horizontal, DeckStyle.rowInset).padding(.bottom, 6)
     .frame(height: DropdownLayout.Metrics(showDescriptions: false).headerHeight, alignment: .bottom)
   }
 
@@ -422,13 +434,13 @@ struct DropdownView: View {
     case .cursorColor:
       CursorColorMenu(
         cursor: cursor, pointer: pointer, onCustom: onOpenCursorSettings,
-        snapshot: snapshotSearch != nil, isFocused: focusedControl == "cursorColor"
+        snapshot: snapshotSearch != nil, isFocused: showsFocus("cursorColor")
       )
       .focused($focusedControl, equals: "cursorColor").id("cursorColor")
     case .audioOutput:
       AudioMenuRow(
         audio: audio, snapshot: snapshotSearch != nil,
-        onOpenSettings: onOpenSoundSettings, isFocused: focusedControl == "audioOutput"
+        onOpenSettings: onOpenSoundSettings, isFocused: showsFocus("audioOutput")
       )
       .focused($focusedControl, equals: "audioOutput").id("audioOutput")
     case .header:
@@ -436,7 +448,7 @@ struct DropdownView: View {
     case .row(let spec):
       DropdownControlRow(
         spec: spec, state: engine.state(spec.id),
-        showDescriptions: settings.showDescriptions, isFocused: focusedControl == spec.id,
+        showDescriptions: settings.showDescriptions, isFocused: showsFocus(spec.id),
         snapshot: snapshotSearch != nil, trailingReserve: browsing ? pinWidth : 0
       ) {
         Task { await engine.set(spec.id, on: !engine.state(spec.id).isOn) }
@@ -498,13 +510,16 @@ struct DropdownView: View {
       Button(action: onOpenSettings) {
         Label("Customize", systemImage: "slider.horizontal.3")
           .font(.system(size: 12, weight: .medium))
-          .padding(.horizontal, 8).frame(height: 26)
+          .padding(.horizontal, 11).frame(height: 26)
       }
-      .buttonStyle(DeckButtonStyle()).help("Choose and reorder menu controls (Command-comma)")
+      .buttonStyle(DeckButtonStyle()).clipShape(Capsule()).deckCapsule(nativeGlass: !drawsOffscreen)
+      .help("Choose and reorder menu controls (Command-comma)")
       .keyboardShortcut(",", modifiers: .command)
     }
     .font(DeckStyle.caption).foregroundStyle(.secondary)
-    .padding(.leading, DeckStyle.panelInset + 4).padding(.trailing, DeckStyle.panelInset - 2)
+    // Count text lines up with the section labels, the button with the cards.
+    .padding(.leading, DeckStyle.panelInset + DeckStyle.rowInset)
+    .padding(.trailing, DeckStyle.panelInset)
     .frame(height: DropdownChrome.footerHeight)
     // An overlay, so the hairline adds no height to the chrome sum.
     .overlay(alignment: .top) {
@@ -588,7 +603,7 @@ struct DropdownView: View {
       .buttonStyle(DeckButtonStyle()).padding(.top, 4)
     }
     .padding(20).frame(maxWidth: .infinity).frame(minHeight: 176)
-    .deckCard()
+    .deckCard(nativeGlass: !drawsOffscreen)
     .padding(.horizontal, DeckStyle.panelInset)
     .padding(.top, DropdownChrome.columnsTopPadding)
     .padding(.bottom, DropdownChrome.columnsBottomPadding)
@@ -608,6 +623,11 @@ struct DropdownView: View {
   private func moveFocus(_ direction: DropdownNavigation.Direction) {
     focusedControl = DropdownNavigation.target(
       in: navigationColumns, current: focusedControl, direction: direction)
+    keyboardFocus = focusedControl
     if focusedControl != nil { searchFocused = false }
+  }
+
+  private func showsFocus(_ id: String) -> Bool {
+    focusedControl == id && keyboardFocus == id
   }
 }

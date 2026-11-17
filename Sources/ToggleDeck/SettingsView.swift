@@ -280,7 +280,7 @@ struct SettingsView: View {
     }
     .font(DeckStyle.rowTitle)
     .padding(.horizontal, 10)
-    .deckSearchField(isFocused: searchFocused)
+    .deckSearchField()
   }
 }
 
