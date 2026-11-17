@@ -38,6 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         onQuit: { NSApp.terminate(nil) },
         onOpenCursorSettings: { [weak self] in self?.showSettings(section: .cursor) },
         onOpenSoundSettings: { [weak self] in self?.showSettings(section: .sound) },
+        onOpenSceneSettings: { [weak self] in self?.showSettings(section: .scenes) },
         onClose: { [weak self] in self?.popover.performClose(nil) },
         onSizeChange: { [weak self] in self?.resizePopover(to: $0) },
         session: dropdownSession

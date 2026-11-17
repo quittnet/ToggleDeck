@@ -4,6 +4,7 @@ import SwiftUI
 enum SettingsSection: Hashable {
   case general
   case dropdown
+  case scenes
   case cursor
   case sound
   case all
@@ -13,6 +14,7 @@ enum SettingsSection: Hashable {
     switch self {
     case .general: return "General"
     case .dropdown: return "Your Menu"
+    case .scenes: return "Scenes"
     case .cursor: return "Cursor"
     case .sound: return "Sound"
     case .all: return "Everyday Settings"
@@ -24,6 +26,7 @@ enum SettingsSection: Hashable {
     switch self {
     case .general: return "gearshape.fill"
     case .dropdown: return "menubar.arrow.down.rectangle"
+    case .scenes: return "sparkles"
     case .cursor: return "cursorarrow"
     case .sound: return "speaker.wave.2.fill"
     case .all: return "square.grid.2x2.fill"
@@ -37,6 +40,7 @@ enum SettingsSection: Hashable {
     switch self {
     case .general: return Color(red: 0.52, green: 0.53, blue: 0.56)
     case .dropdown: return Color(red: 0.86, green: 0.24, blue: 0.24)
+    case .scenes: return Color(red: 0.45, green: 0.36, blue: 0.85)
     case .cursor: return Color(red: 0.6, green: 0.44, blue: 0.3)
     case .sound: return Color(red: 0.33, green: 0.4, blue: 0.55)
     case .all: return Color(red: 0.8, green: 0.55, blue: 0)
@@ -53,6 +57,7 @@ struct SettingsView: View {
   @ObservedObject var pointer: PointerController
   @ObservedObject var audio: AudioController
   @ObservedObject var shortcut: GlobalShortcutController
+  @ObservedObject var scenes: SceneStore
 
   @StateObject private var router: SettingsRouter
   @ViewState<String> private var query = ""
@@ -67,7 +72,7 @@ struct SettingsView: View {
     engine: ToggleEngine = .shared,
     settings: AppSettings = .shared, cursor: CursorColorController = .shared,
     pointer: PointerController = .shared, audio: AudioController = .shared,
-    shortcut: GlobalShortcutController = .shared
+    shortcut: GlobalShortcutController = .shared, scenes: SceneStore = .shared
   ) {
     self.engine = engine
     self.settings = settings
@@ -75,6 +80,7 @@ struct SettingsView: View {
     self.pointer = pointer
     self.audio = audio
     self.shortcut = shortcut
+    self.scenes = scenes
     _router = StateObject(wrappedValue: router ?? SettingsRouter(section: initialSection))
   }
 
@@ -119,6 +125,7 @@ struct SettingsView: View {
       Section {
         row(.general)
         row(.dropdown)
+        row(.scenes)
         row(.cursor)
         row(.sound)
         row(.all)
@@ -187,6 +194,7 @@ struct SettingsView: View {
     case .general: GeneralPane(settings: settings, engine: engine, shortcut: shortcut)
     case .dropdown:
       DropdownPane(settings: settings, engine: engine) { section = .all }
+    case .scenes: ScenesPane(scenes: scenes, engine: engine)
     case .cursor: CursorColorsPane(cursor: cursor, pointer: pointer)
     case .sound: AudioPane(audio: audio)
     case .all: listPane(Catalog.all, title: "Everyday Settings", grouped: true)

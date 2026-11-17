@@ -9,6 +9,7 @@ struct DropdownView: View {
   @ObservedObject var pointer: PointerController
   @ObservedObject var audio: AudioController
   @ObservedObject var session: DropdownSession
+  @ObservedObject var scenes: SceneStore
   @ViewState<String> private var query = ""
   @ViewState<ControlFilter> private var filter = ControlFilter.all
   @FocusState private var searchFocused: Bool
@@ -22,6 +23,7 @@ struct DropdownView: View {
   var onQuit: () -> Void
   var onOpenCursorSettings: () -> Void
   var onOpenSoundSettings: () -> Void
+  var onOpenSceneSettings: () -> Void
   var onClose: () -> Void = {}
   var onSizeChange: (CGSize) -> Void = { _ in }
   var previewSpecs: [ToggleSpec]?
@@ -32,9 +34,11 @@ struct DropdownView: View {
     engine: ToggleEngine = .shared, settings: AppSettings = .shared,
     cursor: CursorColorController = .shared,
     pointer: PointerController = .shared, audio: AudioController = .shared,
+    scenes: SceneStore = .shared,
     onOpenSettings: @escaping () -> Void, onQuit: @escaping () -> Void,
     onOpenCursorSettings: @escaping () -> Void = {},
-    onOpenSoundSettings: @escaping () -> Void = {}, onClose: @escaping () -> Void = {},
+    onOpenSoundSettings: @escaping () -> Void = {},
+    onOpenSceneSettings: @escaping () -> Void = {}, onClose: @escaping () -> Void = {},
     onSizeChange: @escaping (CGSize) -> Void = { _ in }, previewSpecs: [ToggleSpec]? = nil,
     snapshotSearch: String? = nil, offscreen: Bool = false,
     session: DropdownSession = DropdownSession()
@@ -44,11 +48,13 @@ struct DropdownView: View {
     self.cursor = cursor
     self.pointer = pointer
     self.audio = audio
+    self.scenes = scenes
     self.session = session
     self.onOpenSettings = onOpenSettings
     self.onQuit = onQuit
     self.onOpenCursorSettings = onOpenCursorSettings
     self.onOpenSoundSettings = onOpenSoundSettings
+    self.onOpenSceneSettings = onOpenSceneSettings
     self.onClose = onClose
     self.onSizeChange = onSizeChange
     self.previewSpecs = previewSpecs
@@ -100,8 +106,12 @@ struct DropdownView: View {
     }
   }
 
+  /// Scenes act on the menu as a whole, so they hide while searching or filtering.
+  private var showsScenes: Bool { !browsing && !scenes.scenes.isEmpty }
+
   private var extraChrome: CGFloat {
-    (engine.banner == nil ? 0 : DropdownChrome.bannerHeight)
+    (showsScenes ? DropdownChrome.sceneStrip : 0)
+      + (engine.banner == nil ? 0 : DropdownChrome.bannerHeight)
       + (engine.state("keepAwake").isOn
         ? DropdownChrome.awakeStripHeight + DropdownChrome.awakeStripBottomPadding : 0)
       + (filter == .all ? 0 : DropdownChrome.filterCaptionHeight)
@@ -121,6 +131,11 @@ struct DropdownView: View {
     let packed = layout
     VStack(spacing: 0) {
       header
+      if showsScenes {
+        SceneStrip(
+          scenes: scenes, engine: engine, snapshot: snapshotSearch != nil,
+          onEdit: onOpenSceneSettings)
+      }
       if controlCount == 0 {
         empty
       } else {
@@ -323,6 +338,8 @@ struct DropdownView: View {
       Menu {
         Button("Customize Menu…", action: onOpenSettings).keyboardShortcut(
           ",", modifiers: .command)
+        Button(
+          scenes.scenes.isEmpty ? "Create a Scene…" : "Edit Scenes…", action: onOpenSceneSettings)
         Toggle("Show Descriptions", isOn: $settings.showDescriptions)
         Toggle("Group by category", isOn: $settings.groupDropdown)
         Menu("Keep Awake") { AwakeDurationActions(engine: engine) }

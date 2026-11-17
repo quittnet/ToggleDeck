@@ -18,6 +18,12 @@ enum RenderTest {
     let pointer = PointerController.preview()
     let audio = AudioController.preview()
     let shortcut = GlobalShortcutController.preview()
+    var working = DeckScene(name: "Deep Work")
+    working.targets = [
+      SceneTarget(id: "darkMode", on: false), SceneTarget(id: "nightShift", on: true),
+      SceneTarget(id: "wifi", on: true),
+    ]
+    let scenes = SceneStore.preview([.presenting, working])
 
     // Real windows, parked offscreen, so SwiftUI's .task and .searchable
     // behave as they do in the shipping app.
@@ -28,7 +34,8 @@ enum RenderTest {
         NSHostingView(
           rootView: DropdownView(
             engine: engine, settings: settingsModel, cursor: cursor, pointer: pointer,
-            audio: audio, onOpenSettings: {}, onQuit: {}, previewSpecs: specs, offscreen: true
+            audio: audio, scenes: scenes, onOpenSettings: {}, onQuit: {}, previewSpecs: specs,
+            offscreen: true
           )
           .environment(\.colorScheme, dark ? .dark : .light)), dark: dark)
     }
@@ -39,7 +46,7 @@ enum RenderTest {
         view: NSHostingView(
           rootView: SettingsView(
             initialSection: section, engine: engine, settings: settingsModel, cursor: cursor,
-            pointer: pointer, audio: audio, shortcut: shortcut
+            pointer: pointer, audio: audio, shortcut: shortcut, scenes: scenes
           ).environment(\.colorScheme, dark ? .dark : .light)), dark: dark,
         window: SettingsWindow.make(title: "ToggleDeck Settings"))
     }
@@ -55,6 +62,8 @@ enum RenderTest {
       ("settings", pane(.dropdown)),
       ("all", pane(.all)),
       ("general", pane(.general)),
+      ("scenes", pane(.scenes)),
+      ("scenes-dark", pane(.scenes, dark: true)),
       ("cursor", pane(.cursor)),
       ("sound", pane(.sound)),
       ("category", pane(.category(.display))),

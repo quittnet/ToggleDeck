@@ -203,6 +203,9 @@ enum DropdownChrome {
   static let awakeStripHeight: CGFloat = 34
   static let awakeStripBottomPadding: CGFloat = 10
   static let bannerHeight: CGFloat = 108
+  static let sceneChipHeight: CGFloat = 26
+  static let sceneStripBottomPadding: CGFloat = 8
+  static var sceneStrip: CGFloat { sceneChipHeight + sceneStripBottomPadding }
 
   static var header: CGFloat { searchTopPadding + searchHeight + searchBottomPadding }
 
