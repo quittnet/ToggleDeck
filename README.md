@@ -1,4 +1,4 @@
-# ToggleDeck 2.11.0
+# ToggleDeck 2.12.0
 
 A menu bar app with 23 everyday Mac switches, two optional controls for Hammerspoon users, cursor controls, and a Sound dropdown. All switches are pinned by default; Customize lets you remove and reorder them. Search also finds cursor, pointer, fill, outline, color presets, pointer size, audio outputs, and saved combination names.
 
@@ -65,6 +65,10 @@ A saved default menu adds this control on upgrade. Custom menu order and intenti
 - Refresh pressed during an automatic refresh is queued instead of ignored. The menu opens on your controls with search and filter cleared. Customize opens Your Menu. Arrow keys move between the search field and the controls, and a control keeps keyboard focus after Space.
 - Show Icons on Desktop works on accounts that have never changed it. Mute Sound is unavailable on outputs without a mute control. Dark Mode waits for the first Automation prompt, and Bluetooth waits for the radio to settle before reporting a failure.
 - `--set` and `--toggle` follow the "Restart affected apps automatically" preference. An extra or unknown argument after any command prints the usage text and exits 2. `--selftest` exits 1 when its report cannot be written.
+
+## New in 2.12
+
+- The installer no longer starts a second copy of the app. It writes the login item without loading it into the current session, so only the copy it opens runs.
 
 ## New in 2.11
 

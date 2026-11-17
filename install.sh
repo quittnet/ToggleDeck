@@ -62,9 +62,9 @@ cat > "$STAGED_APP/Contents/Info.plist" << 'EOF'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.11.0</string>
+    <string>2.12.0</string>
     <key>CFBundleVersion</key>
-    <string>20</string>
+    <string>22</string>
     <key>CFBundleIconFile</key>
     <string>ToggleDeckIcon-v21</string>
     <key>LSMinimumSystemVersion</key>
@@ -125,8 +125,12 @@ if [ "$WITH_LOGIN_ITEM" -eq 1 ]; then
 </dict>
 </plist>
 EOF
+    # launchd reads the plist at the next login, so writing it is the whole
+    # registration. Loading it now would make launchd start a second copy
+    # (RunAtLoad, launched outside LaunchServices) next to the one `open`
+    # starts below, leaving two menu bar icons. Only unload a job that an
+    # earlier install loaded into this session; the old process is already gone.
     launchctl bootout "gui/$(id -u)/com.user.toggledeck" 2>/dev/null || true
-    launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null || launchctl load "$PLIST" 2>/dev/null || true
 fi
 
 if [ "$LAUNCH" -eq 1 ]; then
